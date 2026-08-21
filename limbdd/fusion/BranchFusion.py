@@ -383,3 +383,55 @@ def anf_pool(bitstr, n):
         if (a >> m) & 1:
             entries.append((CompleteBranch(n, mask=m, bitstr=m), 0, m))
     return entries
+
+
+def anf_pool_premerged(bitstr, n):
+    """
+    ANF 分解池 + 差一变量单项式对预合并（Optimization_roadmap.md T-3 / 1.2）。
+
+    恒等式（精确，无近似）：
+        x^S ⊕ x^{S∪{j}} = x^S(1 ⊕ x_j) = x^S · x̄_j        ← 仍是仿射立方（C3 特例）
+    表示：CompleteBranch(n, mask=S∪{j}, bitstr=S)（走线段，全正极性除 j）。
+
+    配对策略：按掩码升序贪心做极大匹配——对每个未消费单项式 m，取最小的 j 使
+    m|(1<<j) 仍是未消费单项式，二者合并为 x^m x̄_j。O(|池|·n)。
+
+    注意：这是**强制**配对（先于融合引擎），个别用例上可能不如让贪心自行选择；
+    因此生产路径把它作为第三条分解路径 C′，与 C(原始 ANF)同跑、逐例取 ΣT 较小者，
+    从而逐例不劣。预合并使池规模显著缩小（随机 f 的 ANF 池可缩 30%~50%），
+    也是大 n 下的运行时优化（合并产物仍为纯立方，命中 O(popcount) 快径）。
+    """
+    monomials = set()
+    a = bitstr
+    size = 1 << n
+    for j in range(n):
+        step = 1 << j
+        block = step << 1
+        for base in range(0, size, block):
+            for m in range(base, base + step):
+                if (a >> m) & 1:
+                    a ^= 1 << (m + step)
+    for m in range(size):
+        if (a >> m) & 1:
+            monomials.add(m)
+
+    consumed = set()
+    entries = []
+    for m in range(size):                    # 掩码升序,确定性
+        if not (a >> m) & 1 or m in consumed:
+            continue
+        partner = None
+        for j in range(n):
+            if (m >> j) & 1:
+                continue
+            p = m | (1 << j)
+            if p in monomials and p not in consumed:
+                partner = p
+                break
+        if partner is not None:
+            consumed.add(m)
+            consumed.add(partner)
+            entries.append((CompleteBranch(n, mask=partner, bitstr=m), 0, partner))
+        else:
+            entries.append((CompleteBranch(n, mask=m, bitstr=m), 0, m))
+    return entries

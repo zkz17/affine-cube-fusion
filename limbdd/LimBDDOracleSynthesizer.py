@@ -5,7 +5,7 @@ from limbdd.LimBDD import LimBDD, SimpleBranch
 from limbdd.LimBDDManager import LimBDDManager
 from limbdd.fusion.FusedBackend import limbdd2circ_fused
 from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
-from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool
+from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, anf_pool_premerged
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit
 from utils.to_qiskit import to_qiskit
@@ -130,10 +130,13 @@ class LimBDDOracleSynthesizer:
         """
         Phase 5+：min(BDD, ANF) 全局融合后端（默认 no-ancilla 路径）。
 
-        两条分解路径同跑、取融合后 ΣT 较小者（单起点融合，无随机多起点）：
+        三条分解路径同跑、取融合后 ΣT 较小者（单起点融合，无随机多起点）：
           A. BDD 路径：图阶段与 process() 逐行同构（try_neg / split_neg / reorder /
              分片与吸收时序），全部子图的分支（各携带片根掩码 r）进全局融合池；
-          C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段。
+          C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段；
+          C′. ANF+预合并路径（1.2 / T-3）：单项式池先做差一变量对预合并
+             （x^S ⊕ x^{S∪{j}} = x^S·x̄_j，精确恒等），池更小、形态不同；
+             逐例取 min(A, C, C′) ⇒ 相对既有后端**逐例不劣**。
 
         发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)，同 r 的多片可安全合并），
         融合段（r=0）独立发射（自包含对合，位置无关）；末尾 simplify_terms。
@@ -147,10 +150,19 @@ class LimBDDOracleSynthesizer:
         # ---- 路径 C：ANF 分解 ----
         entries_c = anf_pool(tt.bitstr, n)
         kept_c, standalone_c = fuse_pool_global(entries_c, n)
-        t_c = pool_t_cost(kept_c, standalone_c)
 
-        kept, standalone = (kept_a, standalone_a) if pool_t_cost(kept_a, standalone_a) <= t_c \
-            else (kept_c, standalone_c)
+        # ---- 路径 C′：ANF 分解 + 差一变量预合并 ----
+        entries_c2 = anf_pool_premerged(tt.bitstr, n)
+        kept_c2, standalone_c2 = fuse_pool_global(entries_c2, n)
+
+        # 并列时优先级 A > C > C′(保持与 1.2 之前 A/C 的并列行为一致)
+        candidates = [
+            (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a),
+            (pool_t_cost(kept_c, standalone_c), kept_c, standalone_c),
+            (pool_t_cost(kept_c2, standalone_c2), kept_c2, standalone_c2),
+        ]
+        best_cost = min(c[0] for c in candidates)
+        _, kept, standalone = next(c for c in candidates if c[0] == best_cost)
 
         # ---- 发射：按根掩码分组 ----
         kept_by_r = {}

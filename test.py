@@ -12,6 +12,7 @@ from tests.test_fused_backend import test_backend_equivalence, test_simplify_pre
 from tests.test_global_fusion import test_shift_fusion_contract, test_global_pool_invariant, \
     test_global_backend_equivalence, test_global_backend_stats
 from tests.test_closed_form import main as closed_form_suite
+from tests.test_premerge import main as premerge_suite
 
 def main():
     argparser = argparse.ArgumentParser(prog='Test Script')
@@ -25,6 +26,7 @@ def main():
     argparser.add_argument('-e', '--fused_backend_test', action='store_true')
     argparser.add_argument('-p', '--global_fusion_test', action='store_true')
     argparser.add_argument('-q', '--closed_form_test'  , action='store_true')
+    argparser.add_argument('-r', '--premerge_test'     , action='store_true')
 
     args = argparser.parse_args()
 
@@ -53,6 +55,8 @@ def main():
         test_global_backend_stats()
     if args.closed_form_test:
         closed_form_suite(verbose=args.verbose)
+    if args.premerge_test:
+        premerge_suite(verbose=args.verbose)
 
 if __name__ == '__main__':
     main()
