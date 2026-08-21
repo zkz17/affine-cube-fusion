@@ -14,6 +14,7 @@ from tests.test_global_fusion import test_shift_fusion_contract, test_global_poo
 from tests.test_closed_form import main as closed_form_suite
 from tests.test_premerge import main as premerge_suite
 from tests.test_fprm import main as fprm_suite
+from tests.test_degree_bound import main as degree_bound_suite
 
 def main():
     argparser = argparse.ArgumentParser(prog='Test Script')
@@ -29,6 +30,7 @@ def main():
     argparser.add_argument('-q', '--closed_form_test'  , action='store_true')
     argparser.add_argument('-r', '--premerge_test'     , action='store_true')
     argparser.add_argument('-s', '--fprm_test'         , action='store_true')
+    argparser.add_argument('-d', '--degree_bound_test' , action='store_true')
 
     args = argparser.parse_args()
 
@@ -61,6 +63,8 @@ def main():
         premerge_suite(verbose=args.verbose)
     if args.fprm_test:
         fprm_suite(verbose=args.verbose)
+    if args.degree_bound_test:
+        degree_bound_suite(verbose=args.verbose)
 
 if __name__ == '__main__':
     main()

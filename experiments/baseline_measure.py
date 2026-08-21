@@ -31,6 +31,8 @@ EXPERIMENTS = os.path.join(ROOT, 'experiments')
 import limbdd.fusion.BranchFusion as BF
 import limbdd.LimBDDOracleSynthesizer as SYN
 from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from limbdd.CompleteBranch import t_cost as mcx_t_cost
+from limbdd.fusion.BranchFusion import anf_degree
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 from evaluate import count_t_cost
@@ -115,7 +117,7 @@ def measure(n, count, verify):
     probe.install()
 
     rows = []
-    t_sum, exor_sum, wall = 0, 0, 0.0
+    t_sum, exor_sum, bound_sum, wall = 0, 0, 0, 0.0
     failures = []
     try:
         for tt_int, t_exor in cases:
@@ -128,6 +130,8 @@ def measure(n, count, verify):
             rows.append((tt_int, t_cost))
             t_sum += t_cost
             exor_sum += t_exor
+            # G-3:免费质量下界 t(deg f)
+            bound_sum += mcx_t_cost(anf_degree(tt.bitstr, n))
 
             if verify and not synth.circ.verify(tt):
                 failures.append(tt_int)
@@ -140,6 +144,7 @@ def measure(n, count, verify):
 
     return {
         'n': n, 'cases': len(cases), 'sum_t': t_sum, 'sum_exor': exor_sum,
+        'sum_bound': bound_sum,
         'wall': wall, 'fuse_time': probe.fuse_time,
         'affine_calls': probe.affine_calls, 'affine_work': probe.affine_work,
         'shift_calls': probe.shift_calls, 'shift_work': probe.shift_work,
@@ -160,7 +165,8 @@ def main():
         print(f'--- n={n} ({args.cases} cases) ---', flush=True)
         r = measure(n, args.cases, not args.no_verify)
         results.append(r)
-        print(f'  ΣT={r["sum_t"]} (exorcism {r["sum_exor"]})  '
+        print(f'  ΣT={r["sum_t"]} (exorcism {r["sum_exor"]})  G-3 下界 Σt(deg f)={r["sum_bound"]} '
+              f'({r["sum_bound"] / max(r["sum_t"], 1):.0%} of ΣT)  '
               f'wall={r["wall"]:.2f}s  fusion={r["fuse_time"]:.2f}s '
               f'({r["fuse_time"] / max(r["wall"], 1e-9):.0%} of wall)', flush=True)
         print(f'  is_affine_cube: {r["affine_calls"]} calls / {r["affine_work"]:,} enum steps;  '
@@ -172,11 +178,11 @@ def main():
     lines.append('阶段 0.3 基线(1.1 闭式切换的验收对照)')
     lines.append(f'命令: {" ".join(sys.argv)}')
     lines.append('')
-    header = f'{"n":>3} {"cases":>6} {"ΣT":>10} {"ΣT_exor":>10} {"wall(s)":>9} {"fusion(s)":>10} {"fus%":>5} {"affine_calls":>13} {"affine_steps":>14} {"shift_calls":>12} {"verify":>7}'
+    header = f'{"n":>3} {"cases":>6} {"ΣT":>10} {"ΣT_exor":>10} {"Σbound":>8} {"wall(s)":>9} {"fusion(s)":>10} {"fus%":>5} {"affine_calls":>13} {"affine_steps":>14} {"shift_calls":>12} {"verify":>7}'
     lines.append(header)
     lines.append('-' * len(header))
     for r in results:
-        lines.append(f'{r["n"]:>3} {r["cases"]:>6} {r["sum_t"]:>10} {r["sum_exor"]:>10} '
+        lines.append(f'{r["n"]:>3} {r["cases"]:>6} {r["sum_t"]:>10} {r["sum_exor"]:>10} {r["sum_bound"]:>8} '
                      f'{r["wall"]:>9.2f} {r["fuse_time"]:>10.2f} '
                      f'{r["fuse_time"] / max(r["wall"], 1e-9) * 100:>4.0f}% '
                      f'{r["affine_calls"]:>13,} {r["affine_work"]:>14,} {r["shift_calls"]:>12,} '

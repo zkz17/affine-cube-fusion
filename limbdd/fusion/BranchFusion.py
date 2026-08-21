@@ -368,6 +368,20 @@ def pool_t_cost(kept, standalone):
     return sum(cb.t_cost() for cb, _, _ in kept) + sum(cb.t_cost() for cb in standalone)
 
 
+def anf_degree(bitstr, n):
+    """
+    f 的 ANF 次数 = ANF 单项式掩码的最大 popcount。
+
+    推论 D1（docs/Optimization_roadmap.md 引理 D）：任意分支段分解的 ΣT ≥ t(deg f),
+    故 t(anf_degree) 是**免费的全局质量下界**(G-3 度量)。注意 deg 在可逆仿射代换
+    （含 FPRM 平移）下不变。成本 = 一次 anf_pool（O(n·2^n),与 ANF 路径同价）。
+    """
+    deg = 0
+    for cb, _, _ in anf_pool(bitstr, n):
+        deg = max(deg, cb.mask.bit_count())
+    return deg
+
+
 def anf_pool(bitstr, n):
     """
     ANF 分解池（纯代数初始分解）：真值表 bitstr 经快速 Möbius 变换得到 ANF 系数，

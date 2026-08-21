@@ -2,6 +2,8 @@ import sys
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
 from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from limbdd.CompleteBranch import t_cost as mcx_t_cost
+from limbdd.fusion.BranchFusion import anf_degree
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 
@@ -28,10 +30,12 @@ def count_t_cost(circ):
 
 def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=80000):
     """
-    融合后端（默认 min(BDD, ANF)）与 Exorcism 的对比：
+    融合后端（min(BDD, ANF, FPRM)）与 Exorcism 的对比：
       - 逐例 better/worse/same 统计；
-      - 总 T 门数量（ΣT）对比。
-    逐例融合后端 T 写入 data/our_rand_tcost_fused_{num_var}_{start}_{stop}.txt。
+      - 总 T 门数量（ΣT）对比；
+      - G-3 质量下界：Σ t(deg f)（推论 D1：任意段分解 ΣT ≥ t(deg f)）。
+    逐例融合后端 T 写入 data/our_rand_tcost_fused_{num_var}_{start}_{stop}.txt；
+    逐例下界写入 data/our_deg_bound_{num_var}_{start}_{stop}.txt。
     """
     lines = []
     with open(f'data/exorcism_rand_tcost_{num_var}.txt', 'r') as f:
@@ -41,12 +45,14 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=80000):
 
     better, worse, eqv = 0, 0, 0
     worse_cases = []
-    t_exor_sum, t_fused_sum = 0, 0
+    t_exor_sum, t_fused_sum, t_bound_sum = 0, 0, 0
+    n_at_bound = 0
 
     stop = stop if stop <= len(lines) else len(lines)
     total = stop - start
 
     out = open(f'data/our_rand_tcost_fused_{num_var}_{start}_{stop}.txt', 'w')
+    out_bound = open(f'data/our_deg_bound_{num_var}_{start}_{stop}.txt', 'w')
 
     for counter in range(start, stop):
         if counter % 1000 == 0:
@@ -59,8 +65,14 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=80000):
         t_cost = count_t_cost(to_qiskit(synthesizer.circ))
         out.write(f'{tt}:{t_cost}\n')
 
+        # G-3:免费质量下界 t(deg f)(deg 在仿射代换下不变,随机 f 上通常较松)
+        bound = mcx_t_cost(anf_degree(truth_table.bitstr, num_var))
+        out_bound.write(f'{tt}:{bound}\n')
+
         t_exor_sum += tcost_exor
         t_fused_sum += t_cost
+        t_bound_sum += bound
+        n_at_bound += (t_cost <= bound)
         if t_cost > tcost_exor: 
             worse += 1
             worse_cases.append(tt)
@@ -68,7 +80,8 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=80000):
         else: better += 1
 
     out.close()
-    print("****** Comparison of TDD-based Method Alg. 1 (fused backend, min(BDD,ANF)) to Exorcism  ******")
+    out_bound.close()
+    print("****** Comparison of TDD-based Method Alg. 1 (fused backend, min(BDD,ANF,FPRM)) to Exorcism  ******")
     print(f"number of input variables: {num_var}")
     print(f"lower  t-cost in {better}({better / total * 100}%) cases")
     print(f"higher t-cost in {worse}({worse / total * 100}%) cases")
@@ -76,6 +89,8 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=80000):
     print(f"cases with higher t-cost: {worse_cases[:min(len(worse_cases), 20)]}")
     print(f"total t-cost: exorcism {t_exor_sum}, fused {t_fused_sum} "
           f"(ΣT 缩减 {1 - t_fused_sum / max(1, t_exor_sum):.2%})")
+    print(f"G-3 下界: Σ t(deg f) = {t_bound_sum} (为 fused ΣT 的 {t_bound_sum / max(1, t_fused_sum):.2%};"
+          f" 达到下界的用例 {n_at_bound}/{total})")
     print("****** ****** ******")
 
 def main():
