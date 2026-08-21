@@ -1,0 +1,479 @@
+from utils.Qubit import QubitManager
+from utils.TruthTable import TruthTable
+from limbdd.Node import LimBDDNode, LimBDDSignal
+from limbdd.LimBDD import LimBDD, SimpleBranch
+from limbdd.LimBDDManager import LimBDDManager
+from limbdd.fusion.FusedBackend import limbdd2circ_fused
+from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
+from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool
+from circuit.Control import Control
+from circuit.MCXCircuit import MCXCircuit
+from utils.to_qiskit import to_qiskit
+from config import config
+
+class LimBDDOracleSynthesizer:
+    def __init__(self, reorder=True, ancilla_num=1, fused_backend=True):
+        self.limbdd = None
+        self.limbdd_mgr = LimBDDManager()
+        self.qubit_mgr = QubitManager()
+        self.circ = MCXCircuit(self.qubit_mgr)
+        self.nidx2circ = {}             # { LimBDDNode.idx : [ MCXCircuit, int ] }
+        self.reorder = reorder
+        self.ancilla_num = ancilla_num
+        # Phase 5 起：融合发射后端为 no-ancilla 路径的默认后端（ancilla_num>0 时静默忽略）
+        self.fused_backend = fused_backend
+
+    def clear(self):
+        self.limbdd = None
+        self.limbdd_mgr = LimBDDManager()
+        self.qubit_mgr.clear()
+        self.nidx2circ.clear()
+        self.circ.clear()
+        self.circ = MCXCircuit(self.qubit_mgr)
+
+    def construct(self, tt):
+        var_order = self.determine_firsttime_order(tt.copy())
+        self.limbdd_mgr.initialize(tt, var_order)
+        self.allocate_input_qubit(tt.num_var)
+
+    def synthesize(self, tt, path=None):
+        assert(isinstance(tt, TruthTable))
+
+        self.clear()
+        if self.fused_backend and self.ancilla_num == 0:
+            self.process_fused_global(tt, path)   # Phase 5+：min(BDD, ANF) 全局融合后端
+            return
+
+        self.construct(tt)
+        if path: self.show(self.limbdd_mgr.limbdd, path, title=f'{tt.num_var} input function {tt.bitstr}\n{str(tt)}')
+
+        self.process(path)
+
+    def process(self, path=None):
+        self.limbdd_mgr.try_neg(self.limbdd_mgr.limbdd)
+        self.limbdd_mgr.split_neg(self.limbdd_mgr.limbdd)
+
+        if self.reorder:
+            self.variable_reorder()
+            if path: self.show(self.limbdd_mgr.limbdd, path + '_reorder')
+            #self.limbdd_mgr.split_neg(self.limbdd_mgr.limbdd)
+        
+        for limbdd_list in self.limbdd_mgr.limbdd_list.values():
+            for limbdd in limbdd_list:
+                self.circ.merge(self.limbdd2circ(limbdd, self.ancilla_num, collect_br=False))
+            limbdd_list.clear()
+        
+        self.circ.merge(self.limbdd2circ(self.limbdd_mgr.limbdd, self.ancilla_num))
+
+        if self.limbdd_mgr.limbdd.root.level in self.limbdd_mgr.limbdd_list:
+            while len(self.limbdd_mgr.limbdd_list[self.limbdd_mgr.limbdd.root.level]):
+                limbdd = self.limbdd_mgr.limbdd_list[self.limbdd_mgr.limbdd.root.level].pop()
+                self.circ.merge(self.limbdd2circ(limbdd, self.ancilla_num))
+                #limbdd = self.limbdd_mgr.fuse_level(tt.num_var)
+                #if limbdd: self.circ.merge(self.limbdd2circ(limbdd, self.ancilla_num))
+
+    def _collect_pieces_fused(self, path=None):
+        """
+        Phase 5 融合路径的图阶段（与旧 process() 的图阶段逐行同构）：
+        try_neg / split_neg / reorder / 分片与吸收时序，返回处理顺序的非零子图列表。
+        不生成电路；供 process_fused_global 与残差测量脚本复用。
+        """
+        mgr = self.limbdd_mgr
+        mgr.try_neg(mgr.limbdd)
+        mgr.split_neg(mgr.limbdd)
+
+        if self.reorder:
+            self.variable_reorder()
+            if path: self.show(mgr.limbdd, path + '_reorder')
+
+        pieces = []  # 处理顺序（吸收/拆分后仍非零的子图）
+        for limbdd_list in mgr.limbdd_list.values():
+            for limbdd in limbdd_list:
+                if limbdd.root.weight:
+                    mgr.perform_split(limbdd)
+                mgr.append_temp_to_list()
+                if limbdd.root.weight:
+                    pieces.append(limbdd)
+            limbdd_list.clear()
+
+        main = mgr.limbdd
+        if main.root.weight:
+            mgr.collect_branches(main, main.root.level)
+            mgr.append_temp_to_list()
+            if main.root.weight:
+                pieces.append(main)
+
+        if main.root.level in mgr.limbdd_list:
+            while len(mgr.limbdd_list[main.root.level]):
+                limbdd = mgr.limbdd_list[main.root.level].pop()
+                if limbdd.root.weight:
+                    mgr.collect_branches(limbdd, limbdd.root.level)
+                    mgr.append_temp_to_list()
+                    if limbdd.root.weight:
+                        pieces.append(limbdd)
+        return pieces
+
+    def _bdd_entries(self, tt, path):
+        """一次完整的 BDD 分解（construct + 图阶段 + sifting），返回全局条目列表。
+        construct 会重建 limbdd_mgr，可安全连续调用多次。"""
+        self.construct(tt)
+        pieces = self._collect_pieces_fused(path)
+        n = tt.num_var
+        entries = []
+        for idx, piece in enumerate(pieces):
+            r = abs_lim(piece.root.lim, piece.var_order)
+            for cb in extract_complete_branches(piece, n):
+                entries.append((cb, r, idx))
+        return entries
+
+    def process_fused_global(self, tt, path=None):
+        """
+        Phase 5+：min(BDD, ANF) 全局融合后端（默认 no-ancilla 路径）。
+
+        两条分解路径同跑、取融合后 ΣT 较小者（单起点融合，无随机多起点）：
+          A. BDD 路径：图阶段与 process() 逐行同构（try_neg / split_neg / reorder /
+             分片与吸收时序），全部子图的分支（各携带片根掩码 r）进全局融合池；
+          C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段。
+
+        发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)，同 r 的多片可安全合并），
+        融合段（r=0）独立发射（自包含对合，位置无关）；末尾 simplify_terms。
+        """
+        n = tt.num_var
+
+        # ---- 路径 A：BDD 分解 ----
+        entries_a = self._bdd_entries(tt, path)
+        kept_a, standalone_a = fuse_pool_global(entries_a, n)
+
+        # ---- 路径 C：ANF 分解 ----
+        entries_c = anf_pool(tt.bitstr, n)
+        kept_c, standalone_c = fuse_pool_global(entries_c, n)
+        t_c = pool_t_cost(kept_c, standalone_c)
+
+        kept, standalone = (kept_a, standalone_a) if pool_t_cost(kept_a, standalone_a) <= t_c \
+            else (kept_c, standalone_c)
+
+        # ---- 发射：按根掩码分组 ----
+        kept_by_r = {}
+        for cb, r, idx in kept:
+            kept_by_r.setdefault(r, []).append(cb)
+        for r, segs in sorted(kept_by_r.items()):
+            r_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(r)]
+            self.circ.add_lim_operator(r_qubits)
+            for cb in segs:
+                self.circ.merge(cb.to_circuit(self.qubit_mgr))
+            self.circ.add_lim_operator(r_qubits)
+        for cb in standalone:
+            self.circ.merge(cb.to_circuit(self.qubit_mgr))
+
+        self.circ.simplify_terms()
+
+    def limbdd2circ(self, limbdd, anc_num, collect_br=True):
+        assert(isinstance(limbdd, LimBDD))
+
+        if not limbdd.root.weight: return MCXCircuit()
+        '''
+        self.show(limbdd, path=f'figure/debug/fig_{config['debug_figure_counter']}')
+        config['debug_figure_counter'] += 1
+        '''
+        if collect_br: self.limbdd_mgr.collect_branches(limbdd, limbdd.root.level)
+        else: self.limbdd_mgr.perform_split(limbdd)
+        self.limbdd_mgr.append_temp_to_list()
+        if not limbdd.root.weight: return MCXCircuit()
+
+        if self.fused_backend and anc_num == 0:
+            # Phase 4：CompleteBranch 融合发射后端（抽取 → 融合池 → 逐段发射 + 根三明治）
+            n = self.qubit_mgr.get_input_num()
+            return limbdd2circ_fused(limbdd, self.qubit_mgr, n)
+
+        assert(not len(self.nidx2circ))
+        self.limbdd = limbdd
+
+        o_qubit_list, _ = self.get_o_qubit_list(limbdd.root)
+
+        circ = MCXCircuit(self.qubit_mgr)
+        circ.add_lim_operator(o_qubit_list)
+        if limbdd.root.level <= 3:
+            circ.merge(self.generate_circ_wo_anc(limbdd.root.node))
+        else:
+            branch_list_map = LimBDDManager.branch_process(limbdd.root.node, [limbdd.terminator])
+            if len(branch_list_map):
+                branch_list = branch_list_map[limbdd.terminator]
+                circ.merge(self.generate_circ_with_anc(limbdd.root.node, branch_list, anc_num=anc_num, control_list=[]))
+            else:
+                circ.merge(self.generate_circ_wo_anc(limbdd.root.node))
+        circ.add_lim_operator(o_qubit_list)
+
+        self.nidx2circ.clear()
+        self.limbdd = None
+        return circ
+
+    def determine_firsttime_order(self, tt):
+        assert(isinstance(tt, TruthTable))
+
+        var_branch_distance = {}
+        for var_index in range(tt.num_var): var_branch_distance[var_index] = 0
+
+        self.compute_branch_distance(tt, var_branch_distance)
+        return sorted(var_branch_distance, key=lambda k: var_branch_distance[k], reverse=True)
+
+    def compute_branch_distance(self, tt, var_branch_distance):
+        assert(isinstance(tt, TruthTable) and isinstance(var_branch_distance, dict))
+
+        if tt.num_var == 0: return
+        if tt.num_var > 1: tt.try_neg()
+        tt0, tt1 = tt.split(tt.num_var - 1)
+        var_branch_distance[tt0.num_var] += TruthTable.distence(tt0, tt1)
+
+        self.compute_branch_distance(tt0, var_branch_distance)
+        self.compute_branch_distance(tt1, var_branch_distance)
+
+    def variable_reorder(self):
+        limbdd = self.limbdd_mgr.limbdd
+
+        # Skip reordering for tiny diagrams: no branch structure to improve.
+        if limbdd.root.level <= 2 or len(limbdd.node_table) <= limbdd.root.level + 1: return
+
+        top_level = limbdd.root.level
+        while top_level > 1 and len(limbdd.level2nodes[top_level - 1]) == 1: top_level -= 1
+        self.limbdd_mgr.sifting(limbdd, 0, top_level)
+
+    def allocate_input_qubit(self, num_var):
+        for var_index in range(num_var):
+            self.qubit_mgr.get_input_qubit(var_index)
+    
+    def identify_cut(self, start, branch_list, anc_num, control_num=0):
+        assert(isinstance(start, LimBDDNode))
+
+        cut_map = {}
+        for branch in branch_list:
+            assert(isinstance(branch, SimpleBranch))
+
+            if branch.bitnum + control_num == 5: target_length = 2
+            else: target_length = max(2, (branch.bitnum + control_num + 1) // (anc_num + 1))
+            top_branch, bot_branch = branch.cut(target_length)
+            mid = LimBDDManager.locate_branch_end(start, branch, length=target_length)
+
+            if mid in cut_map:
+                if top_branch in cut_map[mid]: cut_map[mid][top_branch].append(bot_branch)
+                else: cut_map[mid][top_branch] = [bot_branch]
+            else: cut_map[mid] = {top_branch: [bot_branch]}
+        return cut_map
+
+    def get_pivot_to_circ(self, pivot_limbdd, x_map, cx_map, add_before):
+        nested_synthesizer = LimBDDOracleSynthesizer(ancilla_num=0, fused_backend=False)
+        nested_synthesizer.qubit_mgr = self.qubit_mgr
+        nested_synthesizer.circ = MCXCircuit(self.qubit_mgr)
+        nested_synthesizer.limbdd_mgr.limbdd = pivot_limbdd
+        nested_synthesizer.limbdd_mgr.limbdd_list.clear()
+        for height in range(nested_synthesizer.limbdd_mgr.limbdd.root.level + 1):
+            nested_synthesizer.limbdd_mgr.limbdd_list[height] = []
+
+        nested_synthesizer.process()
+
+        if not add_before: circ = nested_synthesizer.circ
+        else: circ = MCXCircuit(self.qubit_mgr)
+
+        o_qubit_list = []
+        for var_index in x_map:
+            if x_map[var_index]: o_qubit_list.append(self.qubit_mgr.get_input_qubit(var_index))
+        circ.add_lim_operator(o_qubit_list)
+
+        for ctrl_var in cx_map:
+            pos_qubit_list, neg_qubit_list = [], []
+            for target_var in cx_map[ctrl_var]:
+                if cx_map[ctrl_var][target_var]: pos_qubit_list.append(self.qubit_mgr.get_input_qubit(target_var))
+                else: neg_qubit_list.append(self.qubit_mgr.get_input_qubit(target_var))
+            if not len(pos_qubit_list) and not len(neg_qubit_list): continue
+
+            control_qubit = self.qubit_mgr.get_input_qubit(ctrl_var)
+            circ.add_lim_operator(pos_qubit_list, Control( control_qubit ))
+            circ.add_lim_operator(neg_qubit_list, Control( control_qubit, polar=0 ))
+
+        if add_before: circ.merge(nested_synthesizer.circ)
+
+        return circ
+
+    def generate_circ_with_anc(self, start, branch_list, anc_num=1, control_list=None):
+        assert(isinstance(start, LimBDDNode))
+
+        if control_list is None: control_list = []
+
+        circ = MCXCircuit(self.qubit_mgr)
+        if not anc_num:
+            for branch in branch_list: circ.merge(self.branch2circ(start, self.limbdd.terminator, branch))
+        else:
+            short_branches, long_branches = [], []
+            for branch in branch_list: 
+                if branch.bitnum + len(control_list) <= 3:
+                    circ.merge(self.branch2circ(start, self.limbdd.terminator, branch.copy()))
+                    short_branches.append(branch)
+                else:
+                    long_branches.append(branch)
+            '''
+            if anc_num == self.ancilla_num:
+                self.show(self.limbdd, path=f'figure/debug/fig_{config['debug_figure_counter']}')
+                config['debug_figure_counter'] += 1
+            print('short_branches: ', [str(branch) for branch in short_branches])
+            print('long_branches : ', [str(branch) for branch in long_branches])
+            '''
+            if len(long_branches) == 1 and long_branches[0].bitnum + len(control_list) <= 4:
+            #if False:
+                circ.merge(self.branch2circ(start, self.limbdd.terminator, long_branches[0]))
+            elif len(long_branches):
+                ancilla = self.qubit_mgr.get_ancilla_qubit(anc_num)
+                
+                cut_map = self.identify_cut(start, long_branches, anc_num, control_num=len(control_list))
+                last_top_branch, last_mid = None, None
+                for mid, branch_map in cut_map.items():
+                    #print(f'****** mid: {mid.idx} ******')
+                    #print(f'self.anc: {self.ancilla_num}, anc_num: {anc_num}, ancilla: {str(ancilla)}')
+                    for top_branch, bot_branch_list in branch_map.items():
+                        #print(f'top_branch: {str(top_branch)}, bot_branches: {[str(branch) for branch in bot_branch_list]}')
+                        bot_circ = self.generate_circ_with_anc(mid, bot_branch_list, anc_num - 1, [ Control(ancilla) ])
+                        if not last_top_branch: top_circ = self.branch2circ(start, mid, top_branch.copy())
+                        else:
+                            fuse_limbdd, x_map, cx_map = LimBDDManager.pivot_to(start, last_top_branch, top_branch, self.limbdd)
+                            #self.show(fuse_limbdd, path=f'figure/debug/fig_{config['debug_figure_counter'] - 1}_fuse')
+                            top_circ = self.get_pivot_to_circ(fuse_limbdd, x_map, cx_map, last_mid.level > mid.level)
+                            '''
+                            self.show(fuse_limbdd, path=f'figure/debug/fig_{config['debug_figure_counter'] - 1}_fuse_syn')
+                            fuse_circ = top_circ
+                            top_circ = self.branch2circ(start, last_mid, last_top_branch)
+                            top_circ.merge(self.branch2circ(start, mid, top_branch.copy()))
+                            
+                            print(f'fuse_circ:')
+                            print(to_qiskit(fuse_circ))
+                            print(f'direct_circ:')
+                            print(to_qiskit(top_circ))
+                            '''
+                        circ.merge(top_circ, target=ancilla)
+                        circ.merge_controlled_circuit(bot_circ, [ Control(ancilla) ])
+                        '''
+                        print('top_circ:')
+                        print(to_qiskit(top_circ))
+                        print('bot_circ:')
+                        print(to_qiskit(bot_circ))
+                        print('circ:')
+                        print(to_qiskit(circ))
+                        '''
+                        last_top_branch, last_mid = top_branch, mid
+                if last_top_branch: circ.merge(self.branch2circ(start, last_mid, last_top_branch), target=ancilla)
+        return circ
+    
+    def branch2circ(self, start, end, branch, target=None):
+        assert(isinstance(start, LimBDDNode) and isinstance(end, LimBDDNode) and isinstance(branch, SimpleBranch))
+
+        start_index = start.idx
+        key = (start_index, branch.bitstr, branch.bitnum)
+        if key in self.nidx2circ: # Circuit already computed.
+            circ = self.nidx2circ[key].copy()
+        else:
+            circ = MCXCircuit(self.qubit_mgr, target)
+            if start is end: # terminator
+                circ.add_gate([], circ.target)
+                self.nidx2circ[key] = circ.copy()
+            else:
+                control_qubit = self.qubit_mgr.get_input_qubit(start.var_index)
+                
+                if start.low.node is start.high.node and start.low.weight and start.high.weight:
+                    low_o_qubit_list , low_o_qubit_list_  = self.get_o_qubit_list(start.low , terminate_level=end.level)
+                    high_o_qubit_list, high_o_qubit_list_ = self.get_o_qubit_list(start.high, terminate_level=end.level)
+
+                    circ.add_lim_operator(low_o_qubit_list , Control(control_qubit, polar=0))
+                    circ.add_lim_operator(high_o_qubit_list, Control(control_qubit, polar=1))
+                    circ.merge(self.branch2circ(start.low.node, end, branch, target))
+                    circ.add_lim_operator(low_o_qubit_list , Control(control_qubit, polar=0))
+                    circ.add_lim_operator(high_o_qubit_list, Control(control_qubit, polar=1))
+                    ''''''
+                    circ.add_lim_operator(low_o_qubit_list_ , Control(control_qubit, polar=0))
+                    circ.add_lim_operator(high_o_qubit_list_, Control(control_qubit, polar=1))
+                    
+                    self.nidx2circ[key] = circ.copy()
+                else:
+                    polar = branch.bitstr & 1
+                    branch.rshift()
+
+                    successor = start.successors[polar]
+                    assert(successor.weight)
+
+                    o_qubit_list, o_qubit_list_ = self.get_o_qubit_list(successor, terminate_level=end.level)
+
+                    circ.add_lim_operator(o_qubit_list)
+                    circ.merge_controlled_circuit(self.branch2circ(successor.node, end, branch, target), [ Control(control_qubit, polar=polar) ])
+                    circ.add_lim_operator(o_qubit_list)
+                    ''''''
+                    circ.add_lim_operator(o_qubit_list_)
+                    
+                    self.nidx2circ[key] = circ.copy()
+        return circ
+    
+    def generate_circ_wo_anc(self, node, target=None):
+        assert(isinstance(node, LimBDDNode))
+
+        node_index = node.idx
+        if node_index in self.nidx2circ: # Circuit already computed.
+            circ = self.nidx2circ[node_index][0].copy()
+            self.nidx2circ[node_index][1] -= 1
+            if not self.nidx2circ[node_index][1]: self.nidx2circ.pop(node_index)
+            return circ
+        else:
+            circ = MCXCircuit(self.qubit_mgr, target)
+            if not node.low: # terminator
+                circ.add_gate([], circ.target)
+                if len(node.parents) >= 2: self.nidx2circ[node.idx] = [circ.copy(), len(node.parents) - 1]
+                return circ
+            else:
+                control_qubit = self.qubit_mgr.get_input_qubit(node.var_index)
+                
+                if node.low.node is node.high.node and node.low.weight and node.high.weight:
+                    low_o_qubit_list , _ = self.get_o_qubit_list(node.low)
+                    high_o_qubit_list, _ = self.get_o_qubit_list(node.high)
+
+                    circ.add_lim_operator(low_o_qubit_list , Control(control_qubit, polar=0))
+                    circ.add_lim_operator(high_o_qubit_list, Control(control_qubit, polar=1))
+                    circ.merge(self.generate_circ_wo_anc(node.low.node, target))
+                    circ.add_lim_operator(low_o_qubit_list , Control(control_qubit, polar=0))
+                    circ.add_lim_operator(high_o_qubit_list, Control(control_qubit, polar=1))
+
+                    if len(node.parents) >= 2: self.nidx2circ[node.idx] = [circ.copy(), len(node.parents) - 1]
+                    return circ
+                else:
+                    for i in range(2):
+                        if not node.successors[i].weight: continue
+                        o_qubit_list, _ = self.get_o_qubit_list(node.successors[i])
+
+                        circ.add_lim_operator(o_qubit_list)
+                        circ.merge_controlled_circuit(self.generate_circ_wo_anc(node.successors[i].node, target), [ Control(control_qubit, polar=i) ])
+                        circ.add_lim_operator(o_qubit_list)
+                    if len(node.parents) >= 2: self.nidx2circ[node.idx] = [circ.copy(), len(node.parents) - 1]
+                    return circ
+    
+    def get_o_qubit_list(self, signal, terminate_level=0):
+        assert(isinstance(signal, LimBDDSignal))
+
+        o_qubit_list, o_qubit_list_ = [], []
+        bitstr = signal.lim.bitstr
+        for level_minus_one in range(terminate_level):
+            if not bitstr: break
+
+            var_index = self.limbdd.var_order[level_minus_one - self.limbdd.root.level]
+
+            pivot = (1 << level_minus_one)
+            if pivot & bitstr:
+                o_qubit_list_.append(self.qubit_mgr.get_input_qubit(var_index))
+                bitstr -= pivot
+
+        bitstr >>= terminate_level
+        for level_minus_one in range(signal.lim.bitnum - terminate_level):
+            if not bitstr: break
+
+            var_index = self.limbdd.var_order[level_minus_one + terminate_level - self.limbdd.root.level]
+
+            pivot = (1 << level_minus_one)
+            if pivot & bitstr:
+                o_qubit_list.append(self.qubit_mgr.get_input_qubit(var_index))
+                bitstr -= pivot
+        return o_qubit_list, o_qubit_list_
+    
+    def show(self, limbdd, path="figure/debug/fig", skip_zero=True, title='LimBDD'):
+        limbdd.show(path, skip_zero=skip_zero, title=title)

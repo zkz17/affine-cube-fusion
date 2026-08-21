@@ -1,0 +1,58 @@
+import argparse
+
+from tests.test_fuse import test_fuse
+from tests.test_branch_split import test_branch_split
+from tests.test_absorb_branch import test_absorb_branch
+from tests.test_complete_branch import test_extraction_equivalence, test_affine_and_emission, \
+    test_direction_key_consistency, test_synthetic_plan
+from tests.test_branch_fusion import test_fusion_contract, test_fuse_pool, \
+    test_four_case_construction, test_pivot_oracle_alignment
+from tests.test_fused_backend import test_backend_equivalence, test_simplify_preserves_semantics, \
+    test_differential_stats_larger, test_flag_fallback
+from tests.test_global_fusion import test_shift_fusion_contract, test_global_pool_invariant, \
+    test_global_backend_equivalence, test_global_backend_stats
+from tests.test_closed_form import main as closed_form_suite
+
+def main():
+    argparser = argparse.ArgumentParser(prog='Test Script')
+
+    argparser.add_argument('-v', '--verbose'           , action='store_true')
+    argparser.add_argument('-f', '--fuse_test'         , action='store_true')
+    argparser.add_argument('-b', '--branch_split_test' , action='store_true')
+    argparser.add_argument('-a', '--absorb_branch_test', action='store_true')
+    argparser.add_argument('-c', '--complete_branch_test', action='store_true')
+    argparser.add_argument('-g', '--branch_fusion_test', action='store_true')
+    argparser.add_argument('-e', '--fused_backend_test', action='store_true')
+    argparser.add_argument('-p', '--global_fusion_test', action='store_true')
+    argparser.add_argument('-q', '--closed_form_test'  , action='store_true')
+
+    args = argparser.parse_args()
+
+    if args.fuse_test          : test_fuse(verbose=args.verbose)
+    if args.branch_split_test  : test_branch_split(verbose=args.verbose)
+    if args.absorb_branch_test : test_absorb_branch(verbose=args.verbose)
+    if args.complete_branch_test:
+        test_extraction_equivalence()
+        test_affine_and_emission()
+        test_direction_key_consistency()
+        test_synthetic_plan()
+    if args.branch_fusion_test:
+        test_fusion_contract()
+        test_fuse_pool()
+        test_four_case_construction()
+        test_pivot_oracle_alignment()
+    if args.fused_backend_test:
+        test_backend_equivalence()
+        test_simplify_preserves_semantics()
+        test_differential_stats_larger()
+        test_flag_fallback()
+    if args.global_fusion_test:
+        test_shift_fusion_contract()
+        test_global_pool_invariant()
+        test_global_backend_equivalence()
+        test_global_backend_stats()
+    if args.closed_form_test:
+        closed_form_suite(verbose=args.verbose)
+
+if __name__ == '__main__':
+    main()
