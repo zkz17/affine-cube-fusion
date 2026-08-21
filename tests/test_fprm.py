@@ -62,10 +62,34 @@ def test_fprm_end_to_end(num_vars=5, rounds=100, verbose=False):
     print('FPRM end-to-end test passed!!!')
 
 
+def test_fprm_climb2(num_vars=9, rounds=2, verbose=False):
+    """n≥9 的 climb2 预算策略:零回归 + XOR 不变量(慢,仅少量例)。"""
+    print(f'Testing FPRM climb2 policy with {rounds} random {num_vars}-input functions...')
+
+    n = num_vars
+    synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+    for _ in range(rounds):
+        tt = random_tt(n)
+        kept_f, st_f, c_f = synth._fprm_entries(tt, n)
+
+        x = 0
+        for cb, r, _ in kept_f:
+            assert r == 0, 'FPRM 池应全为 r=0 条目'
+            x ^= cb.fn()
+        for cb in st_f:
+            x ^= cb.fn()
+        assert shift_fn(x, c_f, n) == tt.bitstr, f'climb2 XOR 不变量破坏: c={c_f}'
+
+        kept_0, st_0 = fuse_pool_global(anf_pool(tt.bitstr, n), n)
+        assert pool_t_cost(kept_f, st_f) <= pool_t_cost(kept_0, st_0), 'climb2 劣于 c=0'
+    print('FPRM climb2 test passed!!!')
+
+
 def main(verbose=False):
     for n, rounds in ((4, 120), (5, 80)):
         test_fprm_entries(n, rounds, verbose)
     test_fprm_end_to_end(5, 80, verbose)
+    test_fprm_climb2(9, 2, verbose)
     print('====== All FPRM tests passed!!! ======')
 
 

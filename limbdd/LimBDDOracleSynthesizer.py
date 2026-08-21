@@ -136,8 +136,8 @@ class LimBDDOracleSynthesizer:
           C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段；
           F. FPRM 路径（阶段 3 / G-2.1）：平移子群上搜索最优 c，
              g(x) = f(x⊕c) 重新 Möbius + 融合；电路 = X(c) 三明治（T 免费）。
-             预算策略 A：n ≤ 8 全枚举 2^n；n ≥ 9 固定种子 Random(0) 采样 64 个
-             （含 c=0，确定性）。c=0 即 C 路径 ⇒ 结构性零回归。
+             预算策略（阶段 3.1-C 决策）：n ≤ 8 全枚举 2^n；n ≥ 9 climb2
+             （0/全 1 双起点最陡上升，确定性）。c=0 即 C 路径 ⇒ 结构性零回归。
              并列优先级 A > C > F。
 
         注（2025-08-21）：C′ 路径（ANF 差一变量预合并,1.2/T-3）经实测后**暂时关闭**
@@ -189,29 +189,48 @@ class LimBDDOracleSynthesizer:
         self.circ.add_lim_operator(shift_qubits)
         self.circ.simplify_terms()
 
-    def _fprm_entries(self, tt, n, budget=64):
+    def _fprm_entries(self, tt, n):
         """
         G-2.1：平移子群上搜索最优 ANF 池。
 
-        返回 (kept, standalone, best_c)。预算策略 A：2^n ≤ 256 时全枚举,
-        否则 [0] + Random(0).sample(range(1, 2^n), budget-1)（固定种子,确定性）。
+        返回 (kept, standalone, best_c)。预算策略（阶段 3.1-C 决策）：
+          n ≤ 8：全枚举 2^n（廉价，1.9s/例 以下）；
+          n ≥ 9：climb2 —— 从 c=0 与 c=2^n−1 双起点做最陡上升（Hamming 邻域、
+                 严格改进、缓存复用，确定性），实测兑现全枚举收益的 85%~100%，
+                 优于原 rand64 采样（72%~81%）。
+        已记录未实现的可选项（见 docs/Optimization_roadmap.md）：
+          ① rand64 采样点作多起点爬山的混合方案；② evaluate.py 的全枚举离线开关。
         """
-        from random import Random
-
         full = 1 << n
-        if full <= 256:
-            shifts = range(full)
-        else:
-            shifts = [0] + Random(0).sample(range(1, full), budget - 1)
+        cache = {}
 
-        best = None
-        for c in shifts:
-            g = shift_fn(tt.bitstr, c, n)
-            kept, standalone = fuse_pool_global(anf_pool(g, n), n)
-            cost = pool_t_cost(kept, standalone)
-            if best is None or cost < best[0]:
-                best = (cost, kept, standalone, c)
-        return best[1], best[2], best[3]
+        def eval_c(c):
+            if c not in cache:
+                g = shift_fn(tt.bitstr, c, n)
+                kept, standalone = fuse_pool_global(anf_pool(g, n), n)
+                cache[c] = (pool_t_cost(kept, standalone), kept, standalone)
+            return cache[c]
+
+        if full <= 256:
+            for c in range(full):
+                eval_c(c)
+        else:
+            for start in (0, full - 1):
+                cur = start
+                while True:
+                    best, best_c = eval_c(cur)[0], None
+                    for j in range(n):
+                        nb = cur ^ (1 << j)
+                        v = eval_c(nb)[0]
+                        if v < best:
+                            best, best_c = v, nb
+                    if best_c is None:
+                        break
+                    cur = best_c
+
+        best_c = min(cache, key=lambda c: cache[c][0])
+        _, kept, standalone = cache[best_c]
+        return kept, standalone, best_c
 
     def limbdd2circ(self, limbdd, anc_num, collect_br=True):
         assert(isinstance(limbdd, LimBDD))
