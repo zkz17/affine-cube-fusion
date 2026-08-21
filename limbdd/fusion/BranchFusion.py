@@ -2,33 +2,42 @@
 """
 Phase 3：分支融合原语。
 
-数学依据：CompleteBranch_algebra.md（定理 2 四情形、§3.6 RREF 规范构造）；
-工程规范：CompleteBranch_fusion_plan.md §2.4 / §7.9。
+阶段 1.1（Optimization_roadmap.md T-1）起，判定与构造全部走**闭式路径**：
 
-- is_fusable(a, b)   ：权威判定（d = f_A⊕f_B 为仿射立方，d==0 亦融合=抵消）；
+- is_fusable(a, b)   ：权威判定（定理 2 的结构判定，O(n²)；d==0 亦融合=抵消）；
 - four_case_kind(a, b)：定理 2 的四情形结构分类（测试与桶预筛用）；
 - fuse_pair(a, b)    ：构造融合段（SyntheticPlan）；抵消返回 (None, True)；
-- fuse_pool(branches)：贪心融合池（XOR 不变量、段数单调减）。
-"""
-import collections
+- fuse_pool(branches)：贪心融合池（XOR 不变量、段数单调减）；
+- fuse_pool_global   ：跨片全局融合池（根掩码平移 = base ^= r）。
 
-from limbdd.CompleteBranch import (AffineInfo, CompleteBranch, SyntheticPlan, t_cost,
-                                   affine_from_fn, is_affine_cube, plan_from_affine,
-                                   in_span, reduce_basis)
+数学依据：docs/CompleteBranch_algebra.md（定理 2 四情形、§3.6/§3.7 RREF 规范构造）；
+工程规范：docs/CompleteBranch_fusion_plan.md §2.4 / §7.9。
+闭式实现：limbdd/fusion/ClosedForm.py；其与旧 fn 路径的等价性已由
+tests/test_closed_form.py 全量交叉验证（n=4..7），输出的逐位一致性由
+experiments/phase0_results/baseline_tcost_{n}.txt 的 diff 验收。
+
+旧 fn 路径（fn() / is_affine_cube / affine_from_fn / shift_fn）仍保留：
+  - 供 counterexample_search.py、residual_measurement.py 等研究脚本使用；
+  - 设环境变量 LIMBDD_FUSION_DEBUG=1 时，生产路径每次融合后与 fn 路径对照校验。
+"""
+import os
+
+from limbdd.CompleteBranch import (CompleteBranch, t_cost, in_span, reduce_basis,
+                                   plan_from_affine)
+from limbdd.fusion.ClosedForm import canonical_affine, fuse_closed
+
+# 调试开关：每次融合后用 fn 路径重新校验闭式产物（慢，仅调试用）
+FUSION_DEBUG = os.environ.get('LIMBDD_FUSION_DEBUG') == '1'
 
 
 def is_fusable(a, b):
-    """权威可融合判定：d = f_A⊕f_B 的支撑为仿射子空间（含 d==0 的抵消）。"""
+    """权威可融合判定：supp(f_A⊕f_B) 为仿射子空间（含 d==0 的抵消）。闭式，O(n²)。"""
     assert isinstance(a, CompleteBranch) and isinstance(b, CompleteBranch) and a.n == b.n
-    d = a.fn() ^ b.fn()
-    if d == 0:
-        return True
-    ok, _ = is_affine_cube(d, a.n)
-    return ok
+    return fuse_closed(canonical_affine(a), canonical_affine(b), a.n).ok
 
 
 def four_case_kind(a, b):
-    """定理 2 的四情形结构分类（CompleteBranch_algebra.md §2.2）。返回 1..4 或 None。"""
+    """定理 2 的四情形结构分类（docs/CompleteBranch_algebra.md §2.2）。返回 1..4 或 None。"""
     # 先归约为主元升序的规范基（direction_key 的形式不保证该序），再作成员判定
     ka, kb = reduce_basis(a.direction_key()), reduce_basis(b.direction_key())
     ba, bb = a.affine().base, b.affine().base
@@ -46,6 +55,12 @@ def four_case_kind(a, b):
     return None
 
 
+def _fuse_from_result(res, n, origin):
+    """由闭式判定结果构造融合段（规范 SyntheticPlan，无 2^n 枚举）。"""
+    plan = plan_from_affine(res.base, res.basis, n)
+    return CompleteBranch(n, synthetic=plan, origin=origin)
+
+
 def fuse_pair(a, b):
     """
     构造融合段。返回 (fused, cancelled)：
@@ -55,16 +70,15 @@ def fuse_pair(a, b):
     """
     if not isinstance(a, CompleteBranch) or not isinstance(b, CompleteBranch) or a.n != b.n:
         return None, False
-    d = a.fn() ^ b.fn()
-    if d == 0:
-        return None, True
-    ok, _ = is_affine_cube(d, a.n)
-    if not ok:
+    res = fuse_closed(canonical_affine(a), canonical_affine(b), a.n)
+    if not res.ok:
         return None, False
-    base, basis = affine_from_fn(d, a.n)
-    plan = plan_from_affine(base, basis, a.n)
-    fused = CompleteBranch(a.n, synthetic=plan, origin=a.origin)
-    assert fused.fn() == d, f'融合契约失败: {a!r} ⊕ {b!r}'
+    if res.cancel:
+        return None, True
+    fused = _fuse_from_result(res, a.n, a.origin)
+    if FUSION_DEBUG:
+        d = a.fn() ^ b.fn()
+        assert fused.fn() == d, f'融合契约失败: {a!r} ⊕ {b!r}'
     return fused, False
 
 
@@ -74,6 +88,7 @@ def fuse_pool(branches, max_rounds=None):
 
     策略：每轮收集全部正收益候选（抵消 / d 仿射融合），按 gain 降序贪心
     匹配（每分支至多用一次），融合段重入池；无正收益候选时停止。
+    判定与构造全部走闭式；轨迹与旧 fn 路径逐位一致（0.1 一致性验证 + 0.3 基线 diff）。
     """
     if not branches:
         return []
@@ -81,6 +96,7 @@ def fuse_pool(branches, max_rounds=None):
     assert all(isinstance(b, CompleteBranch) and b.n == n for b in branches)
 
     pool = list(branches)
+    aff = [canonical_affine(b) for b in pool]
     if max_rounds is None:
         max_rounds = len(pool) + 1
     rounds = 0
@@ -89,15 +105,14 @@ def fuse_pool(branches, max_rounds=None):
         cands = []
         for i in range(len(pool)):
             for j in range(i + 1, len(pool)):
-                d = pool[i].fn() ^ pool[j].fn()
-                if d == 0:
+                res = fuse_closed(aff[i], aff[j], n)
+                if not res.ok:
+                    continue
+                if res.cancel:
                     # 抵消恒有益（即使 T 收益为 0 也减少段数与门数），始终入候选
                     cands.append((pool[i].t_cost() + pool[j].t_cost(), i, j, True))
                     continue
-                ok, k = is_affine_cube(d, n)
-                if not ok:
-                    continue
-                gain = pool[i].t_cost() + pool[j].t_cost() - t_cost(n - k)
+                gain = pool[i].t_cost() + pool[j].t_cost() - t_cost(n - res.dim)
                 if gain > 0:
                     cands.append((gain, i, j, False))
         if not cands:
@@ -111,10 +126,16 @@ def fuse_pool(branches, max_rounds=None):
             used.add(i)
             used.add(j)
             if not cancel:
-                fused, _ = fuse_pair(pool[i], pool[j])
-                assert fused is not None
+                res = fuse_closed(aff[i], aff[j], n)
+                assert res.ok and not res.cancel
+                fused = _fuse_from_result(res, n, pool[i].origin)
+                if FUSION_DEBUG:
+                    d = pool[i].fn() ^ pool[j].fn()
+                    assert fused.fn() == d, f'融合契约失败: {pool[i]!r} ⊕ {pool[j]!r}'
                 fused_list.append(fused)
         pool = [b for idx, b in enumerate(pool) if idx not in used] + fused_list
+        aff = [a for idx, a in enumerate(aff) if idx not in used] \
+            + [canonical_affine(b) for b in fused_list]
     return pool
 
 
@@ -138,13 +159,13 @@ def fuse_pool_global(entries, n, max_rounds=None):
                    根三明治内发射；
       standalone : list[CompleteBranch]（key=None，自包含，可置于任意位置发射）。
 
-    判定与构造使用平移后的有效函数 d' = shift(fn_A, r_A) ⊕ shift(fn_B, r_B)
-    （平移不改变方向子空间；base 平移由 affine_from_fn 自然吸收，见代数文档 §1.4）。
+    判定与构造使用平移后的有效函数 d' = f_A(x⊕r_A) ⊕ f_B(x⊕r_B)。闭式上等价于
+    base ^= r（K 平移不变），即 canonical_affine(cb, r)，见代数文档 §1.4。
     """
     if not entries:
         return [], []
     pool = [(cb, r, key) for cb, r, key in entries]
-    eff = [shift_fn(cb.fn(), r, n) for cb, r, _ in pool]
+    aff = [canonical_affine(cb, r) for cb, r, _ in pool]
     if max_rounds is None:
         max_rounds = len(pool) + 1
     rounds = 0
@@ -153,21 +174,20 @@ def fuse_pool_global(entries, n, max_rounds=None):
         cands = []
         for i in range(len(pool)):
             for j in range(i + 1, len(pool)):
-                d = eff[i] ^ eff[j]
-                if d == 0:
+                res = fuse_closed(aff[i], aff[j], n)
+                if not res.ok:
+                    continue
+                if res.cancel:
                     cands.append((pool[i][0].t_cost() + pool[j][0].t_cost(), i, j, True))
                     continue
-                ok, k = is_affine_cube(d, n)
-                if not ok:
-                    continue
-                gain = pool[i][0].t_cost() + pool[j][0].t_cost() - t_cost(n - k)
+                gain = pool[i][0].t_cost() + pool[j][0].t_cost() - t_cost(n - res.dim)
                 if gain > 0:
                     cands.append((gain, i, j, False))
         if not cands:
             break
         cands.sort(reverse=True)
         used = set()
-        new_pool, new_eff = [], []
+        new_pool, new_aff = [], []
         for gain, i, j, cancel in cands:
             if i in used or j in used:
                 continue
@@ -175,15 +195,16 @@ def fuse_pool_global(entries, n, max_rounds=None):
             used.add(j)
             if cancel:
                 continue
-            d = eff[i] ^ eff[j]
-            base, basis = affine_from_fn(d, n)
-            plan = plan_from_affine(base, basis, n)
-            fused = CompleteBranch(n, synthetic=plan, origin=pool[i][0].origin)
-            assert fused.fn() == d, f'全局融合契约失败: {pool[i][0]!r} ⊕ {pool[j][0]!r}'
+            res = fuse_closed(aff[i], aff[j], n)
+            assert res.ok and not res.cancel
+            fused = _fuse_from_result(res, n, pool[i][0].origin)
+            if FUSION_DEBUG:
+                d = shift_fn(pool[i][0].fn(), pool[i][1], n) ^ shift_fn(pool[j][0].fn(), pool[j][1], n)
+                assert fused.fn() == d, f'全局融合契约失败: {pool[i][0]!r} ⊕ {pool[j][0]!r}'
             new_pool.append((fused, 0, None))
-            new_eff.append(fused.fn())
+            new_aff.append(canonical_affine(fused))
         pool = [pool[idx] for idx in range(len(pool)) if idx not in used] + new_pool
-        eff = [eff[idx] for idx in range(len(eff)) if idx not in used] + new_eff
+        aff = [aff[idx] for idx in range(len(aff)) if idx not in used] + new_aff
     kept = [(cb, r, key) for cb, r, key in pool if key is not None]
     standalone = [cb for cb, r, key in pool if key is None]
     return kept, standalone
@@ -198,7 +219,7 @@ def anf_pool(bitstr, n):
     """
     ANF 分解池（纯代数初始分解）：真值表 bitstr 经快速 Möbius 变换得到 ANF 系数，
     每个单项式 x^S（= 仿射立方）即一个 CompleteBranch（mask=bitstr=S，全正极性）。
-    返回 [(CompleteBranch, root=0, key)]，可直接喂给 fuse_pool_global(_multistart)。
+    返回 [(CompleteBranch, root=0, key)]，可直接喂给 fuse_pool_global。
     池 XOR 不变量：⊕ 分支函数 == 原真值表（ANF 定义）。
     """
     a = bitstr
@@ -215,4 +236,3 @@ def anf_pool(bitstr, n):
         if (a >> m) & 1:
             entries.append((CompleteBranch(n, mask=m, bitstr=m), 0, m))
     return entries
-

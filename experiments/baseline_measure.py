@@ -50,22 +50,35 @@ class Probe:
         self._orig = {}
 
     def install(self):
-        orig_affine = BF.is_affine_cube
-        orig_shift = BF.shift_fn
         # 注意:Synthesizer 以 `from ... import fuse_pool_global` 绑定了名字,
         # 因此必须替换 **Synthesizer 模块命名空间**里的那个名字,而不是 BF 里的。
         orig_pool = SYN.fuse_pool_global
-        self._orig = {'affine': orig_affine, 'shift': orig_shift, 'pool': orig_pool}
+        self._orig = {'pool': orig_pool}
 
-        def affine(fn, n):
-            self.affine_calls += 1
-            self.affine_work += 1 << n
-            return orig_affine(fn, n)
+        # 1.1 起生产融合路径为闭式,不再经过 is_affine_cube / shift_fn:
+        # 若这些名字仍存在于 BranchFusion(例如回退到旧实现时),继续对其计数;
+        # 否则保持 0,由输出列直接证明 2^n 路径已从生产链路上消失。
+        if hasattr(BF, 'is_affine_cube'):
+            orig_affine = BF.is_affine_cube
+            self._orig['affine'] = orig_affine
 
-        def shift(fn, r, n):
-            self.shift_calls += 1
-            self.shift_work += 1 << n
-            return orig_shift(fn, r, n)
+            def affine(fn, n):
+                self.affine_calls += 1
+                self.affine_work += 1 << n
+                return orig_affine(fn, n)
+
+            BF.is_affine_cube = affine
+
+        if hasattr(BF, 'shift_fn'):
+            orig_shift = BF.shift_fn
+            self._orig['shift'] = orig_shift
+
+            def shift(fn, r, n):
+                self.shift_calls += 1
+                self.shift_work += 1 << n
+                return orig_shift(fn, r, n)
+
+            BF.shift_fn = shift
 
         def pool(entries, n, max_rounds=None):
             t0 = time.perf_counter()
@@ -74,14 +87,14 @@ class Probe:
             finally:
                 self.fuse_time += time.perf_counter() - t0
 
-        BF.is_affine_cube = affine
-        BF.shift_fn = shift
         SYN.fuse_pool_global = pool
 
     def uninstall(self):
-        BF.is_affine_cube = self._orig['affine']
-        BF.shift_fn = self._orig['shift']
-        SYN.fuse_pool_global = self._orig['pool']
+        for name, orig in self._orig.items():
+            if name == 'pool':
+                SYN.fuse_pool_global = orig
+            else:
+                setattr(BF, name, orig)
 
 
 def load_cases(n, count):
