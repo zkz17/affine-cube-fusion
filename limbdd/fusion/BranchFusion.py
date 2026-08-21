@@ -156,8 +156,11 @@ def _fuse_two(e_i, e_j, n):
     return fuse_closed(e_i.aff, e_j.aff, n)
 
 
-def _pair_candidate(e_i, e_j, i, j, n):
-    """dim 预筛 + 闭式判定;返回候选元组 (gain, i, j, cancel) 或 None。"""
+def _pair_candidate(e_i, e_j, i, j, n, accept_neutral=False):
+    """dim 预筛 + 闭式判定;返回候选元组 (gain, i, j, cancel) 或 None。
+
+    accept_neutral=True(阶段 2 假设检验 G-1a):gain == 0 的非抵消融合也入候选。
+    段数仍每轮严格递减 ⇒ 天然终止,无需 tabu。"""
     if abs(len(e_i.aff[1]) - len(e_j.aff[1])) > 1:
         return None      # 定理 2:可融合 ⟹ dim(K) 差 ≤ 1
     res = _fuse_two(e_i, e_j, n)
@@ -167,7 +170,7 @@ def _pair_candidate(e_i, e_j, i, j, n):
         # 抵消恒有益（即使 T 收益为 0 也减少段数与门数），始终入候选
         return (e_i.cost + e_j.cost, i, j, True)
     gain = e_i.cost + e_j.cost - t_cost(n - res.dim)
-    if gain > 0:
+    if gain > 0 or (accept_neutral and gain == 0):
         return (gain, i, j, False)
     return None
 
@@ -213,9 +216,10 @@ def _merge_desc(a, b):
     return out
 
 
-def _greedy_fusion(entries, n, max_rounds, fused_extra, debug_check=None):
+def _greedy_fusion(entries, n, max_rounds, fused_extra, debug_check=None, accept_neutral=False):
     """
-    分桶 + 增量的贪心融合引擎,与旧「每轮全量重枚举 + 重排序」**逐位一致**:
+    分桶 + 增量的贪心融合引擎,与旧「每轮全量重枚举 + 重排序」**逐位一致**
+    （accept_neutral=False 时;True 为阶段 2 假设检验的零收益平台移动开关）:
 
     1. 首轮按桶枚举全部 |Δdim|≤1 对,建候选并排序;
     2. 每轮按 (gain, i, j) 降序做极大匹配(每分支至多用一次);
@@ -232,7 +236,7 @@ def _greedy_fusion(entries, n, max_rounds, fused_extra, debug_check=None):
 
     cands = []
     for i, j in _bucket_pairs(pool):
-        c = _pair_candidate(pool[i], pool[j], i, j, n)
+        c = _pair_candidate(pool[i], pool[j], i, j, n, accept_neutral)
         if c is not None:
             cands.append(c)
     cands.sort(reverse=True)
@@ -280,12 +284,12 @@ def _greedy_fusion(entries, n, max_rounds, fused_extra, debug_check=None):
         new_cands = []
         for i in range(n_kept):
             for j in range(n_kept, m_new):
-                c = _pair_candidate(pool[i], pool[j], i, j, n)
+                c = _pair_candidate(pool[i], pool[j], i, j, n, accept_neutral)
                 if c is not None:
                     new_cands.append(c)
         for i in range(n_kept, m_new):
             for j in range(i + 1, m_new):
-                c = _pair_candidate(pool[i], pool[j], i, j, n)
+                c = _pair_candidate(pool[i], pool[j], i, j, n, accept_neutral)
                 if c is not None:
                     new_cands.append(c)
         new_cands.sort(reverse=True)
@@ -294,13 +298,14 @@ def _greedy_fusion(entries, n, max_rounds, fused_extra, debug_check=None):
     return pool
 
 
-def fuse_pool(branches, max_rounds=None):
+def fuse_pool(branches, max_rounds=None, accept_neutral=False):
     """
     贪心融合池：XOR 不变量、段数单调减，返回融合后的新列表（不修改输入）。
 
     策略：每轮收集全部正收益候选（抵消 / d 仿射融合），按 gain 降序贪心
     匹配（每分支至多用一次），融合段重入池；无正收益候选时停止。
-    判定与构造全部走闭式；候选维护为分桶 + 增量，轨迹与旧实现逐位一致。
+    判定与构造全部走闭式；候选维护为分桶 + 增量。
+    accept_neutral=True：gain == 0 的融合也接受（段数仍严格递减 ⇒ 天然终止）。
     """
     if not branches:
         return []
@@ -314,7 +319,7 @@ def fuse_pool(branches, max_rounds=None):
             assert fused.fn() == d, f'融合契约失败: {e_i.cb!r} ⊕ {e_j.cb!r}'
     else:
         debug_check = None
-    pool = _greedy_fusion(entries, n, max_rounds, None, debug_check)
+    pool = _greedy_fusion(entries, n, max_rounds, None, debug_check, accept_neutral)
     return [e.cb for e in pool]
 
 
@@ -327,7 +332,7 @@ def shift_fn(fn, r, n):
     return out
 
 
-def fuse_pool_global(entries, n, max_rounds=None):
+def fuse_pool_global(entries, n, max_rounds=None, accept_neutral=False):
     """
     跨片全局融合池（Phase 5）。
 
@@ -340,6 +345,7 @@ def fuse_pool_global(entries, n, max_rounds=None):
 
     判定与构造使用平移后的有效函数 d' = f_A(x⊕r_A) ⊕ f_B(x⊕r_B)。闭式上等价于
     base ^= r（K 平移不变），即 canonical_affine(cb, r)，见代数文档 §1.4。
+    accept_neutral=True：gain == 0 的融合也接受（段数仍严格递减 ⇒ 天然终止）。
     """
     if not entries:
         return [], []
@@ -351,7 +357,7 @@ def fuse_pool_global(entries, n, max_rounds=None):
             assert fused.fn() == d, f'全局融合契约失败: {e_i.cb!r} ⊕ {e_j.cb!r}'
     else:
         debug_check = None
-    pool = _greedy_fusion(pool_entries, n, max_rounds, (0, None), debug_check)
+    pool = _greedy_fusion(pool_entries, n, max_rounds, (0, None), debug_check, accept_neutral)
     kept = [(e.cb, e.extra[0], e.extra[1]) for e in pool if e.extra[1] is not None]
     standalone = [e.cb for e in pool if e.extra[1] is None]
     return kept, standalone
