@@ -5,7 +5,7 @@ from limbdd.LimBDD import LimBDD, SimpleBranch
 from limbdd.LimBDDManager import LimBDDManager
 from limbdd.fusion.FusedBackend import limbdd2circ_fused
 from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
-from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool
+from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, shift_fn
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit
 from utils.to_qiskit import to_qiskit
@@ -130,17 +130,23 @@ class LimBDDOracleSynthesizer:
         """
         Phase 5+：min(BDD, ANF) 全局融合后端（默认 no-ancilla 路径）。
 
-        两条分解路径同跑、取融合后 ΣT 较小者（单起点融合，无随机多起点）：
+        三条分解路径同跑、取融合后 ΣT 较小者（单起点融合，无随机多起点）：
           A. BDD 路径：图阶段与 process() 逐行同构（try_neg / split_neg / reorder /
              分片与吸收时序），全部子图的分支（各携带片根掩码 r）进全局融合池；
-          C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段。
+          C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段；
+          F. FPRM 路径（阶段 3 / G-2.1）：平移子群上搜索最优 c，
+             g(x) = f(x⊕c) 重新 Möbius + 融合；电路 = X(c) 三明治（T 免费）。
+             预算策略 A：n ≤ 8 全枚举 2^n；n ≥ 9 固定种子 Random(0) 采样 64 个
+             （含 c=0，确定性）。c=0 即 C 路径 ⇒ 结构性零回归。
+             并列优先级 A > C > F。
 
         注（2025-08-21）：C′ 路径（ANF 差一变量预合并,1.2/T-3）经实测后**暂时关闭**
         （端到端收益 −0.22%~−0.53% ΣT、代价 +23%~36% wall,处于决策临界区）;
         `BranchFusion.anf_pool_premerged` 与 `tests/test_premerge.py` 保留,随时可重新接入。
 
         发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)，同 r 的多片可安全合并），
-        融合段（r=0）独立发射（自包含对合，位置无关）；末尾 simplify_terms。
+        融合段（r=0）独立发射（自包含对合，位置无关）；FPRM 获胜时整体包 X(c) 三明治;
+        末尾 simplify_terms。
         """
         n = tt.num_var
 
@@ -151,12 +157,23 @@ class LimBDDOracleSynthesizer:
         # ---- 路径 C：ANF 分解 ----
         entries_c = anf_pool(tt.bitstr, n)
         kept_c, standalone_c = fuse_pool_global(entries_c, n)
-        t_c = pool_t_cost(kept_c, standalone_c)
 
-        kept, standalone = (kept_a, standalone_a) if pool_t_cost(kept_a, standalone_a) <= t_c \
-            else (kept_c, standalone_c)
+        # ---- 路径 F：FPRM 平移子群搜索 ----
+        kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
 
-        # ---- 发射：按根掩码分组 ----
+        # 并列时优先级 A > C > F（保持与 F 接入之前 A/C 的并列行为一致）
+        candidates = [
+            (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0),
+            (pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0),
+            (pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c),
+        ]
+        best_cost = min(c[0] for c in candidates)
+        _, kept, standalone, shift_c = next(c for c in candidates if c[0] == best_cost)
+
+        # ---- 发射：FPRM 平移三明治(shift_c=0 时 add_lim_operator([]) 为 no-op)----
+        shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
+        self.circ.add_lim_operator(shift_qubits)
+
         kept_by_r = {}
         for cb, r, idx in kept:
             kept_by_r.setdefault(r, []).append(cb)
@@ -169,7 +186,32 @@ class LimBDDOracleSynthesizer:
         for cb in standalone:
             self.circ.merge(cb.to_circuit(self.qubit_mgr))
 
+        self.circ.add_lim_operator(shift_qubits)
         self.circ.simplify_terms()
+
+    def _fprm_entries(self, tt, n, budget=64):
+        """
+        G-2.1：平移子群上搜索最优 ANF 池。
+
+        返回 (kept, standalone, best_c)。预算策略 A：2^n ≤ 256 时全枚举,
+        否则 [0] + Random(0).sample(range(1, 2^n), budget-1)（固定种子,确定性）。
+        """
+        from random import Random
+
+        full = 1 << n
+        if full <= 256:
+            shifts = range(full)
+        else:
+            shifts = [0] + Random(0).sample(range(1, full), budget - 1)
+
+        best = None
+        for c in shifts:
+            g = shift_fn(tt.bitstr, c, n)
+            kept, standalone = fuse_pool_global(anf_pool(g, n), n)
+            cost = pool_t_cost(kept, standalone)
+            if best is None or cost < best[0]:
+                best = (cost, kept, standalone, c)
+        return best[1], best[2], best[3]
 
     def limbdd2circ(self, limbdd, anc_num, collect_br=True):
         assert(isinstance(limbdd, LimBDD))
