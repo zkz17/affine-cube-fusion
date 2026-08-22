@@ -6,7 +6,7 @@
   B. BDD（仅初始序，无 reorder）+ 融合 —— 移除 reorder；
   C. ANF 分解 + 融合（纯代数，无图阶段）—— ANF 单项式即仿射立方，直接建池融合。
 
-指标：融合后池 ΣT、每例耗时、池规模。样本来自 data/exorcism_rand_tcost_{n}.txt。
+指标：融合后池 ΣT、每例耗时、池规模。样本来自 data/test_cases/test_cases_{n}。
 输出：experiments/phase0_results/decomposition_probe_{n}.txt
 """
 import argparse
@@ -67,9 +67,9 @@ def main():
     for n, count in ((5, args.n5), (6, args.n6), (7, args.n7)):
         if count <= 0:
             continue
-        with open(os.path.join(ROOT, f'data/exorcism_rand_tcost_{n}.txt')) as f:
+        with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
             lines = f.readlines()
-        cases = [int(l.split(':')[0]) for l in rng.sample(lines, min(count, len(lines)))]
+        cases = [int(l.rstrip('\n')) for l in rng.sample(lines, min(count, len(lines)))]
         stats = {'A': [0, 0.0, 0], 'B': [0, 0.0, 0], 'C': [0, 0.0, 0]}  # [ΣT, Σtime, Σpool]
         out_lines = [f'# 分解路径探针 n={n} cases={len(cases)}']
         for ci, tt in enumerate(cases):

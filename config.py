@@ -16,4 +16,7 @@ config = {
     'figure_path_prefix': 'figure/fig_',
     'figure_debug_prefix': 'figure/debug/fig_debug_',
     'debug_figure_counter': 0,
+    # Cost functions for mcx gates (obtained from qiskit)
+    't_cost':  lambda x: 0 if x <= 1 else 8 * (x - 1) - 1,
+    'cx_cost': lambda x: 0 if x <= 0 else (1 if x == 1 else 6 * (x - 1)),
 }

@@ -71,8 +71,8 @@ def main():
     synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
     lines = ['G-2.1 探针:FPRM 平移子群搜索收益测量', '']
     for n, (cases, n_shifts) in PROFILE.items():
-        with open(os.path.join(ROOT, f'data/exorcism_rand_tcost_{n}.txt')) as f:
-            data = [int(line.split(':')[0]) for line in f.readlines()[:cases]]
+        with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
+            data = [int(line.rstrip('\n')) for line in f.readlines()[:cases]]
 
         all_c = list(range(1 << n))
         shifts = all_c if n_shifts is None else [0] + rng.sample(all_c[1:], n_shifts - 1)

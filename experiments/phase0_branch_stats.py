@@ -35,14 +35,10 @@ from circuit.MCXCircuit import MCXCircuit
 from utils.to_qiskit import to_qiskit
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
-# MCX 控制数 -> T 代价（与 evaluate.py 一致）
-T_COST = [0, 0, 7, 16, 24, 62, 80, 200, 216, 272, 392, 448, 504, 560, 616, 672, 728]
-
 
 def t_cost(k):
-    if k < len(T_COST):
-        return T_COST[k]
-    return T_COST[-1] + 56 * (k - (len(T_COST) - 1))  # 粗略线性外推（仅用于超长控制）
+    """k 控 MCX 的 T 代价（单一事实源：config.py 的 't_cost'，近线性新模型）。"""
+    return config['t_cost'](k)
 
 
 def abs_lim(lim, var_order, anomalies):
@@ -473,12 +469,12 @@ def load_cases(args):
     for n, k in [(4, args.n4), (5, args.n5), (6, args.n6), (7, args.n7)]:
         if k <= 0:
             continue
-        with open(os.path.join(ROOT, f'data/exorcism_rand_tcost_{n}.txt')) as f:
+        with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
             lines = f.readlines()
         rng = random.Random(args.seed * 100 + n)
         sample = rng.sample(lines, min(k, len(lines)))
         for line in sample:
-            tt = int(line.split(':')[0])
+            tt = int(line.rstrip('\n'))
             cases.append((n, tt, 'rand'))
     seen, out = set(), []
     for c in cases:

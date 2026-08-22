@@ -110,10 +110,10 @@ def measure_case(entries, n, k4_sizes, k4_samples, shuffles, rng):
 
 
 def load_cases(n, count, seed):
-    with open(os.path.join(ROOT, f'data/exorcism_rand_tcost_{n}.txt')) as f:
+    with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
         lines = f.readlines()
     rng = random.Random(seed * 100 + n)
-    return [int(l.split(':')[0]) for l in rng.sample(lines, min(count, len(lines)))]
+    return [int(l.rstrip('\n')) for l in rng.sample(lines, min(count, len(lines)))]
 
 
 def main():

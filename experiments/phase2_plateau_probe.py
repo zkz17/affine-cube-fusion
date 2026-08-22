@@ -98,8 +98,8 @@ def main():
     lines = ['阶段 2 假设检验:G-1a(gain>=0)/ G-1b(催化剂三元组) 的端到端收益测量', '']
     for n in args.ns:
         cases = args.cases if n <= 7 else max(1, args.cases // 3)
-        with open(os.path.join(ROOT, f'data/exorcism_rand_tcost_{n}.txt')) as f:
-            data = [int(line.split(':')[0]) for line in f.readlines()[:cases]]
+        with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
+            data = [int(line.rstrip('\n')) for line in f.readlines()[:cases]]
         cats = catalyst_entries(n)
 
         stat = Counter()

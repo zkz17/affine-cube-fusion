@@ -22,19 +22,16 @@ CompleteBranch：一个分支的完全信息（压缩表示）。
 """
 from collections import namedtuple
 
+from config import config
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit
 from limbdd.LimBDD import LimBDD, SimpleBranch
 from limbdd.Node import LimBDDNode, LimBDDSignal
 
-# MCX 控制数 -> T 代价（与 evaluate.py 一致）
-T_COST = [0, 0, 7, 16, 24, 62, 80, 200, 216, 272, 392, 448, 504, 560, 616, 672, 728]
-
 
 def t_cost(k):
-    if k < len(T_COST):
-        return T_COST[k]
-    return T_COST[-1] + 56 * (k - (len(T_COST) - 1))  # 粗略线性外推（仅用于超长控制）
+    """k 控 MCX 的 T 代价（单一事实源：config.py 的 't_cost'，近线性新模型）。"""
+    return config['t_cost'](k)
 
 
 AffineInfo = namedtuple('AffineInfo', 'base basis')

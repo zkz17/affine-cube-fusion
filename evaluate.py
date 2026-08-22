@@ -1,109 +1,173 @@
 import sys
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
+from config import config
 from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.CompleteBranch import t_cost as mcx_t_cost
 from limbdd.fusion.BranchFusion import anf_degree
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 
-t_cost_list =[0,0,7,16,24,62,80,200,216,272,392,448,504,560,616,672,728]
-#t_cost_list =[0,0,7,16,24,32,40,48,56,64,72,80,88,96,104,112,120]
+T_COST_FN = config['t_cost']
+CX_COST_FN = config['cx_cost']
 
-def count_t_cost(circ):
-    t_cost = 0
+
+def count_costs(circ):
+    """
+    电路 (T, CX) 代价。口径与 data/exorcism_cost.py / sshr 数据一致:
+      MCX/CCX 按其控制数 k 计 T_COST_FN(k) 与 CX_COST_FN(k);
+      显式 CX 门计 1 个 CX;X 门免费。
+    """
+    t = cx = 0
     for instruction in circ.data:
         gate = instruction.operation
 
         if isinstance(gate, MCXGate):
-            t_cost += t_cost_list[gate.num_ctrl_qubits]
+            t += T_COST_FN(gate.num_ctrl_qubits)
+            cx += CX_COST_FN(gate.num_ctrl_qubits)
         elif isinstance(gate, CCXGate):
-            t_cost += 7
+            t += T_COST_FN(2)
+            cx += CX_COST_FN(2)
         elif isinstance(gate, CXGate):
-            pass
+            cx += 1
         elif isinstance(gate, XGate):
             pass
         else:
             print(f'Unrecognized gate type {type(gate)}.')
-    
-    return t_cost
+    return t, cx
 
-def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=80000):
+
+def count_t_cost(circ):
+    """仅 T 口径（兼容既有调用方）。"""
+    return count_costs(circ)[0]
+
+
+def count_cx_cost(circ):
+    """仅 CX 口径。"""
+    return count_costs(circ)[1]
+
+
+def load_aligned(cases_path, cost_path, start, stop):
     """
-    融合后端（min(BDD, ANF, FPRM)）与 Exorcism 的对比：
-      - 逐例 better/worse/same 统计；
-      - 总 T 门数量（ΣT）对比；
-      - G-3 质量下界：Σ t(deg f)（推论 D1：任意段分解 ΣT ≥ t(deg f)）。
-    逐例融合后端 T 写入 data/our_rand_tcost_fused_{num_var}_{start}_{stop}.txt；
-    逐例下界写入 data/our_deg_bound_{num_var}_{start}_{stop}.txt。
+    读测试用例与逐例基线代价（按行号对齐）。
+    返回 (cases, costs);cost_path 不存在或为空时 costs=None（如 sshr n≥7 留空）。
     """
-    lines = []
-    with open(f'data/exorcism_rand_tcost_{num_var}.txt', 'r') as f:
+    with open(cases_path) as f:
         lines = f.readlines()
+    stop = stop if stop <= len(lines) else len(lines)
+    cases = [int(line.rstrip('\n')) for line in lines[start:stop]]
+
+    try:
+        with open(cost_path) as f:
+            clines = f.readlines()
+    except FileNotFoundError:
+        return cases, None
+    if stop > len(clines):
+        return cases, None
+    costs = [int(line.split(':')[1]) for line in clines[start:stop]]
+    return cases, costs
+
+
+def _compare(name, cases, ours, baseline):
+    """单口径对比;baseline 为 None 时跳过。"""
+    if baseline is None:
+        print(f"===== {name}:基线缺失,跳过 =====")
+        return None
+    better, worse, same = 0, 0, 0
+    worse_cases = []
+    s_base = s_ours = 0
+    for i, tt in enumerate(cases):
+        t_ours = ours[i]
+        t_base = baseline[i]
+        s_base += t_base
+        s_ours += t_ours
+        if t_ours > t_base:
+            worse += 1
+            worse_cases.append(tt)
+        elif t_ours == t_base:
+            same += 1
+        else:
+            better += 1
+    print(f"===== {name} =====")
+    print(f"lower  cost in {better}({better / len(cases) * 100}%) cases")
+    print(f"higher cost in {worse}({worse / len(cases) * 100}%) cases")
+    print(f"same   cost in {same}({same / len(cases) * 100}%) cases")
+    print(f"cases with higher cost: {worse_cases[:min(len(worse_cases), 20)]}")
+    print(f"total cost: baseline {s_base}, ours {s_ours} "
+          f"(缩减 {1 - s_ours / max(1, s_base):.2%})")
+    return (better, worse, same, worse_cases, s_base, s_ours)
+
+
+def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None):
+    """
+    融合后端（min(BDD, ANF, FPRM)）与 Exorcism / SSHR 的对比（T 与 CX 双口径）。
+
+    数据布局（2025-08-22 更新）：
+      测例     data/test_cases/test_cases_{n}（每行一个真值表整数）
+      基线     data/exorcism_cost/exorcism_{t,cx}_cost_{n}、data/sshr_cost/sshr_{t,cx}_cost_{n}
+      （按行号与测例对齐;sshr n≥7 暂空 → 自动跳过该对比）
+    输出:
+      data/our_t_cost_{n}_{start}_{stop}.txt、data/our_cx_cost_{n}_{start}_{stop}.txt
+      data/our_deg_bound_{n}_{start}_{stop}.txt（G-3 下界）
+    """
+    cases_path = f'data/test_cases/test_cases_{num_var}'
+    with open(cases_path) as f:
+        n_total = len(f.readlines())
+    stop = stop if stop is not None and stop <= n_total else n_total
+    total = stop - start
+
+    cases, exor_t = load_aligned(cases_path, f'data/exorcism_cost/exorcism_t_cost_{num_var}', start, stop)
+    _, exor_cx = load_aligned(cases_path, f'data/exorcism_cost/exorcism_cx_cost_{num_var}', start, stop)
+    _, sshr_t = load_aligned(cases_path, f'data/sshr_cost/sshr_t_cost_{num_var}', start, stop)
+    _, sshr_cx = load_aligned(cases_path, f'data/sshr_cost/sshr_cx_cost_{num_var}', start, stop)
 
     synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc, fused_backend=True)
 
-    better, worse, eqv = 0, 0, 0
-    worse_cases = []
-    t_exor_sum, t_fused_sum, t_bound_sum = 0, 0, 0
-    n_at_bound = 0
-
-    stop = stop if stop <= len(lines) else len(lines)
-    total = stop - start
-
-    out = open(f'data/our_rand_tcost_fused_{num_var}_{start}_{stop}.txt', 'w')
+    out_t = open(f'data/our_t_cost_{num_var}_{start}_{stop}.txt', 'w')
+    out_cx = open(f'data/our_cx_cost_{num_var}_{start}_{stop}.txt', 'w')
     out_bound = open(f'data/our_deg_bound_{num_var}_{start}_{stop}.txt', 'w')
 
-    for counter in range(start, stop):
-        if counter % 1000 == 0:
-            print(counter, flush=True)
-        tt = int(lines[counter].split(":")[0])
-        tcost_exor = int(lines[counter].split(":")[1])
-
+    ours_t, ours_cx, bounds = [], [], []
+    for i, tt in enumerate(cases):
+        if i % 1000 == 0:
+            print(i, flush=True)
         truth_table = TruthTable(tt, num_var)
         synthesizer.synthesize(truth_table)
-        t_cost = count_t_cost(to_qiskit(synthesizer.circ))
-        out.write(f'{tt}:{t_cost}\n')
+        t, cx = count_costs(to_qiskit(synthesizer.circ))
+        bound = T_COST_FN(anf_degree(truth_table.bitstr, num_var))
 
-        # G-3:免费质量下界 t(deg f)(deg 在仿射代换下不变,随机 f 上通常较松)
-        bound = mcx_t_cost(anf_degree(truth_table.bitstr, num_var))
+        out_t.write(f'{tt}:{t}\n')
+        out_cx.write(f'{tt}:{cx}\n')
         out_bound.write(f'{tt}:{bound}\n')
+        ours_t.append(t)
+        ours_cx.append(cx)
+        bounds.append(bound)
 
-        t_exor_sum += tcost_exor
-        t_fused_sum += t_cost
-        t_bound_sum += bound
-        n_at_bound += (t_cost <= bound)
-        if t_cost > tcost_exor: 
-            worse += 1
-            worse_cases.append(tt)
-        elif t_cost == tcost_exor: eqv += 1
-        else: better += 1
-
-    out.close()
+    out_t.close()
+    out_cx.close()
     out_bound.close()
-    print("****** Comparison of TDD-based Method Alg. 1 (fused backend, min(BDD,ANF,FPRM)) to Exorcism  ******")
-    print(f"number of input variables: {num_var}")
-    print(f"lower  t-cost in {better}({better / total * 100}%) cases")
-    print(f"higher t-cost in {worse}({worse / total * 100}%) cases")
-    print(f"same   t-cost in {eqv}({eqv / total * 100}%) cases")
-    print(f"cases with higher t-cost: {worse_cases[:min(len(worse_cases), 20)]}")
-    print(f"total t-cost: exorcism {t_exor_sum}, fused {t_fused_sum} "
-          f"(ΣT 缩减 {1 - t_fused_sum / max(1, t_exor_sum):.2%})")
-    print(f"G-3 下界: Σ t(deg f) = {t_bound_sum} (为 fused ΣT 的 {t_bound_sum / max(1, t_fused_sum):.2%};"
-          f" 达到下界的用例 {n_at_bound}/{total})")
+
+    print("****** Comparison of TDD-based Method Alg. 1 (fused backend, min(BDD,ANF,FPRM)) ******")
+    print(f"number of input variables: {num_var} ({total} cases)")
+    _compare("Exorcism T", cases, ours_t, exor_t)
+    _compare("Exorcism CX", cases, ours_cx, exor_cx)
+    _compare("SSHR T", cases, ours_t, sshr_t)
+    _compare("SSHR CX", cases, ours_cx, sshr_cx)
+    print(f"G-3 下界: Σ t(deg f) = {sum(bounds)} (为 ours ΣT 的 {sum(bounds) / max(1, sum(ours_t)):.2%})")
     print("****** ****** ******")
+
 
 def main():
     num_var = int(sys.argv[1]) if len(sys.argv) >= 2 else 3
     reorder = int(sys.argv[2]) if len(sys.argv) >= 3 else 1
     num_anc = int(sys.argv[3]) if len(sys.argv) >= 4 else 0
     start   = int(sys.argv[4]) if len(sys.argv) >= 5 else 0
-    stop    = int(sys.argv[5]) if len(sys.argv) >= 6 else 80000
+    stop    = int(sys.argv[5]) if len(sys.argv) >= 6 else None
 
     if num_anc != 0:
         print('Warning: fused_backend 仅在 ancilla_num=0 时生效（当前 anc>0，将走旧路径）。')
 
     evaluate_all(num_var, reorder > 0, num_anc, start, stop)
+
 
 if __name__ == "__main__":
     main()

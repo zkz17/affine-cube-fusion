@@ -67,8 +67,8 @@ def main():
 
     lines = ['C 方案探测:平移超立方爬山 vs 全枚举的兑现率', '']
     for n, cases in PROFILE.items():
-        with open(os.path.join(ROOT, f'data/exorcism_rand_tcost_{n}.txt')) as f:
-            data = [int(line.split(':')[0]) for line in f.readlines()[:cases]]
+        with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
+            data = [int(line.rstrip('\n')) for line in f.readlines()[:cases]]
 
         rng = random.Random(args.seed)
         stat = Counter()

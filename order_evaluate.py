@@ -1,10 +1,11 @@
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
+from config import config
 from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 
-t_cost_list =[0,0,7,16,24,62,80,200,216,272,392,448,504,560,616,672,728]
+T_COST_FN = config['t_cost']
 
 def count_t_cost(circ):
     t_cost = 0
@@ -12,9 +13,9 @@ def count_t_cost(circ):
         gate = instruction.operation
 
         if isinstance(gate, MCXGate):
-            t_cost += t_cost_list[gate.num_ctrl_qubits]
+            t_cost += T_COST_FN(gate.num_ctrl_qubits)
         elif isinstance(gate, CCXGate):
-            t_cost += 7
+            t_cost += T_COST_FN(2)
         elif isinstance(gate, CXGate):
             pass
         elif isinstance(gate, XGate):
@@ -26,7 +27,7 @@ def count_t_cost(circ):
 
 def evaluate_order(num_var=3):
     lines = []
-    with open(f'data/exorcism_rand_tcost_{num_var}.txt', 'r') as f:
+    with open(f'data/test_cases/test_cases_{num_var}', 'r') as f:
         lines = f.readlines()
 
     synthesizer_reorder = LimBDDOracleSynthesizer(reorder=True)
@@ -35,8 +36,7 @@ def evaluate_order(num_var=3):
     worse_cases = []
     for counter in range(len(lines)):
         print(counter)
-        tt = int(lines[counter].split(":")[0])
-        tcost_exor = int(lines[counter].split(":")[1])
+        tt = int(lines[counter].rstrip('\n'))
 
         truth_table = TruthTable(tt, num_var)
         synthesizer_reorder.synthesize(truth_table)

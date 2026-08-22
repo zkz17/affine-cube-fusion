@@ -100,14 +100,24 @@ class Probe:
 
 
 def load_cases(n, count):
-    path = os.path.join(ROOT, f'data/exorcism_rand_tcost_{n}.txt')
+    """新数据布局(2025-08-22):测例 data/test_cases/test_cases_{n}(每行一个整数),
+    Exorcism T 基线 data/exorcism_cost/exorcism_t_cost_{n}(按行号对齐,缺失则记 0)。"""
+    path = os.path.join(ROOT, f'data/test_cases/test_cases_{n}')
     with open(path) as f:
         lines = f.readlines()
-    out = []
-    for line in lines[:count]:
-        tt_str, t_exor = line.split(':')
-        out.append((int(tt_str), int(t_exor)))
-    return out
+    count = min(count, len(lines))
+    tts = [int(line.rstrip('\n')) for line in lines[:count]]
+
+    exor_path = os.path.join(ROOT, f'data/exorcism_cost/exorcism_t_cost_{n}')
+    exor = [0] * count
+    try:
+        with open(exor_path) as f:
+            elines = f.readlines()
+        for i, line in enumerate(elines[:count]):
+            exor[i] = int(line.split(':')[1])
+    except FileNotFoundError:
+        pass
+    return list(zip(tts, exor))
 
 
 def measure(n, count, verify):

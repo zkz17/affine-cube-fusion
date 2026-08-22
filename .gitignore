@@ -1,8 +1,9 @@
 tmp.txt
 run_and_test.ipynb
 figure/
-data/
+data_bak/
 refactor_notes.md
 venv/
 __pycache__/
 experiments/phase0_results/
+data/*.so

@@ -22,12 +22,12 @@ def test_rand_input(num_var = 5, reorder = False, num_anc = 0, start=0, stop=800
     fail_list = []
 
     lines = []
-    with open(f'data/exorcism_rand_tcost_{num_var}.txt', 'r') as f:
+    with open(f'data/test_cases/test_cases_{num_var}', 'r') as f:
         lines = f.readlines()
     
     stop = stop if stop <= len(lines) else len(lines)
     for counter in range(start, stop):
-        tt = int(lines[counter].split(":")[0])
+        tt = int(lines[counter].rstrip('\n'))
         print(counter, tt)
         
         truth_table = TruthTable(tt, num_var)
