@@ -6,13 +6,14 @@ from limbdd.LimBDDManager import LimBDDManager
 from limbdd.fusion.FusedBackend import limbdd2circ_fused
 from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
 from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, shift_fn
+from limbdd.fusion.GLSearch import gl_search
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 from utils.to_qiskit import to_qiskit
 from config import config
 
 class LimBDDOracleSynthesizer:
-    def __init__(self, reorder=True, ancilla_num=1, fused_backend=True):
+    def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False):
         self.limbdd = None
         self.limbdd_mgr = LimBDDManager()
         self.qubit_mgr = QubitManager()
@@ -22,6 +23,9 @@ class LimBDDOracleSynthesizer:
         self.ancilla_num = ancilla_num
         # Phase 5 起：融合发射后端为 no-ancilla 路径的默认后端（ancilla_num>0 时静默忽略）
         self.fused_backend = fused_backend
+        # G-2.2 可选开关（默认关闭）：确定性 GL(n,2) 局部搜索,时间换质量
+        # (n=7 约 +6s/例,94% 是融合引擎本身——见 Optimization_roadmap.md G-2.2 节)
+        self.gl_search = gl_search
 
     def clear(self):
         self.limbdd = None
@@ -130,7 +134,7 @@ class LimBDDOracleSynthesizer:
         """
         Phase 5+：min(BDD, ANF) 全局融合后端（默认 no-ancilla 路径）。
 
-        三条分解路径同跑、取融合后 ΣT 较小者（单起点融合，无随机多起点）：
+        默认（gl_search=False）三条分解路径同跑、取融合后 ΣT 较小者：
           A. BDD 路径：图阶段与 process() 逐行同构（try_neg / split_neg / reorder /
              分片与吸收时序），全部子图的分支（各携带片根掩码 r）进全局融合池；
           C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段；
@@ -140,12 +144,18 @@ class LimBDDOracleSynthesizer:
              （0/全 1 双起点最陡上升，确定性）。c=0 即 C 路径 ⇒ 结构性零回归。
              并列优先级 A > C > F。
 
+        可选（gl_search=True，G-2.2）：路径 C/F 由 G 取代——
+        确定性 GL(n,2) 局部搜索（起点 = 恒等 + 全部单 CNOT,最陡上升;候选含
+        FPRM 最优 cF 本身 ⇒ G ≤ F ≤ C 支配链保持、零回归;T 并列优先零 wrapper）。
+        代价：n=7 约 +6s/例（94% 为融合引擎,见 Optimization_roadmap.md G-2.2 节）。
+
         注（2025-08-21）：C′ 路径（ANF 差一变量预合并,1.2/T-3）经实测后**暂时关闭**
         （端到端收益 −0.22%~−0.53% ΣT、代价 +23%~36% wall,处于决策临界区）;
         `BranchFusion.anf_pool_premerged` 与 `tests/test_premerge.py` 保留,随时可重新接入。
 
         发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)，同 r 的多片可安全合并），
         融合段（r=0）独立发射（自包含对合，位置无关）；FPRM 获胜时整体包 X(c) 三明治;
+        gl_search 开启时改用 G 路径（见下）并包 CNOT(A⁻¹)/CNOT(A) 线性三明治;
         末尾 simplify_terms。
         """
         n = tt.num_var
@@ -154,25 +164,40 @@ class LimBDDOracleSynthesizer:
         entries_a = self._bdd_entries(tt, path)
         kept_a, standalone_a = fuse_pool_global(entries_a, n)
 
-        # ---- 路径 C：ANF 分解 ----
-        entries_c = anf_pool(tt.bitstr, n)
-        kept_c, standalone_c = fuse_pool_global(entries_c, n)
+        if self.gl_search:
+            # ---- 路径 G：确定性 GL(n,2) 局部搜索(可选,时间换质量)----
+            # G 的候选含 cF 本身(零 wrapper)⇒ G ≤ F ≤ C 支配链保持;
+            # 并列时优先零 wrapper,故 CX 不因并列多付。此处不再单独跑 C/F。
+            kept_g, standalone_g, shift_c, cnots = gl_search(tt.bitstr, n)
+            candidates = [
+                (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()),
+                (pool_t_cost(kept_g, standalone_g), kept_g, standalone_g, shift_c, tuple(cnots)),
+            ]
+        else:
+            # ---- 路径 C：ANF 分解 ----
+            entries_c = anf_pool(tt.bitstr, n)
+            kept_c, standalone_c = fuse_pool_global(entries_c, n)
 
-        # ---- 路径 F：FPRM 平移子群搜索 ----
-        kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
+            # ---- 路径 F：FPRM 平移子群搜索 ----
+            kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
 
-        # 并列时优先级 A > C > F（保持与 F 接入之前 A/C 的并列行为一致）
-        candidates = [
-            (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0),
-            (pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0),
-            (pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c),
-        ]
+            # 并列时优先级 A > C > F（保持与 F 接入之前 A/C 的并列行为一致）
+            candidates = [
+                (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()),
+                (pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0, ()),
+                (pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c, ()),
+            ]
         best_cost = min(c[0] for c in candidates)
-        _, kept, standalone, shift_c = next(c for c in candidates if c[0] == best_cost)
+        _, kept, standalone, shift_c, cnots = next(c for c in candidates if c[0] == best_cost)
 
-        # ---- 发射：FPRM 平移三明治(shift_c=0 时 add_lim_operator([]) 为 no-op)----
+        # ---- 发射：平移三明治 X(c)(shift_c=0 时 no-op)----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
         self.circ.add_lim_operator(shift_qubits)
+
+        # ---- GL 获胜时的线性三明治:CNOT(A⁻¹) = cnots 正序(A = E1∘…∘Ek)----
+        for c_ctrl, t_tgt in cnots:
+            self.circ.add_lim_operator([self.qubit_mgr.get_input_qubit(t_tgt)],
+                                       Control(self.qubit_mgr.get_input_qubit(c_ctrl), 1))
 
         kept_by_r = {}
         for cb, r, idx in kept:
@@ -189,6 +214,11 @@ class LimBDDOracleSynthesizer:
         for seg_circ in order_segments_greedy([cb.to_circuit(self.qubit_mgr) for cb in standalone],
                                               self.circ if not self.circ.empty() else None):
             self.circ.merge(seg_circ)
+
+        # ---- GL 获胜时的线性三明治:CNOT(A) = cnots 逆序 ----
+        for c_ctrl, t_tgt in reversed(cnots):
+            self.circ.add_lim_operator([self.qubit_mgr.get_input_qubit(t_tgt)],
+                                       Control(self.qubit_mgr.get_input_qubit(c_ctrl), 1))
 
         self.circ.add_lim_operator(shift_qubits)
         self.circ.simplify_terms()
