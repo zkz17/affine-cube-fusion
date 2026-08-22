@@ -169,12 +169,15 @@ class SyntheticPlan:
 
 def plan_from_affine(base, basis, n):
     """
-    RREF 规范构造（CompleteBranch_algebra.md §3.6）：
+    RREF 规范构造（docs/CompleteBranch_algebra.md §3.6）：
     仿射立方 e + span(basis) → SyntheticPlan(x_trans=0, cnot_ops, controls)。
 
     约束行由自由列索引：x_f ⊕ Σ_p (r_p)_f x_p = c_f；
     CNOT 网络控制 = 主元变量（不被修改）、目标 = 自由变量（次序无关）；
     常数吸收进 MCX 极性。
+
+    本函数保持**规范形**（唯一、可哈希），供融合池幂等重入；发射时的 CX 最小化
+    由 plan_min_cx 完成（T 不变，只换基）。
     """
     pivots = rref([(b, 0) for b in basis], n)
     pivot_cols = {col for _, _, col in pivots}
@@ -189,6 +192,48 @@ def plan_from_affine(base, basis, n):
                 cnot_ops.append((col, f))
         controls.append((f, c))
     return SyntheticPlan(0, tuple(sorted(cnot_ops)), tuple(sorted(controls)))
+
+
+def _plan_for_basis(base, basis, n):
+    """给定基构造发射计划,返回 (SyntheticPlan, CNOT 数)。plan_from_affine 的构造本体。"""
+    pivots = rref([(b, 0) for b in basis], n)
+    pivot_cols = {col for _, _, col in pivots}
+    free_cols = [f for f in range(n) if f not in pivot_cols]
+    cnot_ops = []
+    controls = []
+    for f in free_cols:
+        c = (base >> f) & 1
+        for mask, _, col in pivots:
+            if (mask >> f) & 1:
+                c ^= (base >> col) & 1
+                cnot_ops.append((col, f))
+        controls.append((f, c))
+    return SyntheticPlan(0, tuple(sorted(cnot_ops)), tuple(sorted(controls))), len(cnot_ops)
+
+
+def plan_min_cx(base, basis, n):
+    """
+    B-4:CX 最优发射计划。
+
+    同一仿射立方有多种基表示;在「规范基 + 所有两向量互加」的确定性候选集上
+    取 CNOT 数最小的构造(并列时保持规范基优先 ⇒ 确定性)。控制数不变 ⇒ T 不变,
+    仅 CNOT 网络规模下降。规范 plan(plan_from_affine)仍用于融合池的幂等/哈希。
+    """
+    candidates = [tuple(basis)]
+    k = len(basis)
+    for i in range(k):
+        for j in range(k):
+            if i == j:
+                continue
+            alt = list(basis)
+            alt[i] = alt[i] ^ alt[j]
+            candidates.append(tuple(alt))
+    best, best_cx = None, None
+    for cand in candidates:
+        plan, ncn = _plan_for_basis(base, cand, n)
+        if best is None or ncn < best_cx:
+            best, best_cx = plan, ncn
+    return best
 
 
 class CompleteBranch:
@@ -352,7 +397,8 @@ class CompleteBranch:
         """
         circ = MCXCircuit(qubit_mgr, target)
         if self.synthetic is not None:
-            plan = self.synthetic
+            # B-4:发射用 CX 最优基(存储 plan 保持 RREF 规范形,控制数不变 ⇒ T 不变)
+            plan = plan_min_cx(*self.affine(), self.n)
             x_qubits = [qubit_mgr.get_input_qubit(v) for v in _bits(plan.x_trans)]
             circ.add_lim_operator(x_qubits)
             for c, t in plan.cnot_ops:

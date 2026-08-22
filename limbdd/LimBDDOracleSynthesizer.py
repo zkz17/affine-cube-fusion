@@ -7,7 +7,7 @@ from limbdd.fusion.FusedBackend import limbdd2circ_fused
 from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
 from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, shift_fn
 from circuit.Control import Control
-from circuit.MCXCircuit import MCXCircuit
+from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 from utils.to_qiskit import to_qiskit
 from config import config
 
@@ -180,11 +180,15 @@ class LimBDDOracleSynthesizer:
         for r, segs in sorted(kept_by_r.items()):
             r_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(r)]
             self.circ.add_lim_operator(r_qubits)
-            for cb in segs:
-                self.circ.merge(cb.to_circuit(self.qubit_mgr))
+            # B-4:段顺序只影响 CX(段集合不变 ⇒ T 不变);
+            # 评估走真实 merge 管线(qubit_map 重映射),前缀为当前未化简电路。
+            for seg_circ in order_segments_greedy([cb.to_circuit(self.qubit_mgr) for cb in segs],
+                                                  self.circ if not self.circ.empty() else None):
+                self.circ.merge(seg_circ)
             self.circ.add_lim_operator(r_qubits)
-        for cb in standalone:
-            self.circ.merge(cb.to_circuit(self.qubit_mgr))
+        for seg_circ in order_segments_greedy([cb.to_circuit(self.qubit_mgr) for cb in standalone],
+                                              self.circ if not self.circ.empty() else None):
+            self.circ.merge(seg_circ)
 
         self.circ.add_lim_operator(shift_qubits)
         self.circ.simplify_terms()
