@@ -59,7 +59,9 @@ class LimBDDManager:
         for other_limbdd in self.limbdd_list[level]:
             if not other_limbdd.root.weight: continue
             self.perform_split(other_limbdd)
-            LimBDDManager.try_absorb_branch(limbdd, other_limbdd)
+            # 已定结论(2025-08-22,bdd_path_conclusions.md (1)):try_absorb_branch 已移除——
+            # 它只做 C1 抵消,而全局融合引擎 fuse_pool_global 无条件覆盖 C1;
+            # P4 实测其单独效应严格为零(±8 噪声级)。函数本体保留于本模块供研究。
             if not limbdd.root.weight: break
     
     def try_neg(self, limbdd):
