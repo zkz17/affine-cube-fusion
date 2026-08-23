@@ -1,4 +1,5 @@
 import sys
+import time
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
 from config import config
@@ -44,6 +45,17 @@ def count_t_cost(circ):
 def count_cx_cost(circ):
     """仅 CX 口径。"""
     return count_costs(circ)[1]
+
+
+def paths_tag(paths, fprm_proxy, gl_search):
+    """路径组合标签(输出文件名用):gl → 'G';否则排序后的路径串,
+    fprm_proxy 时把其中的 F 替换为 FP。"""
+    if gl_search:
+        return 'G'
+    p = ''.join(sorted(paths))
+    if fprm_proxy and 'F' in p:
+        p = p.replace('F', 'FP')
+    return p
 
 
 def load_aligned(cases_path, cost_path, start, stop):
@@ -107,6 +119,8 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                        非 min;n≥9 意图升级平移 climb2)。
     paths            : 生产后端路径选择(探索期纪律,默认 ('F',) 只跑 FPRM 路径;
                        {'A','C','F'} 任意子集,仅计算所选路径并取最优)。
+    输出文件按路径组合分目录名:`data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
+    tag = paths_tag(paths, fprm_proxy, gl_search)。
 
     数据布局（2025-08-22 更新）：
       测例     data/test_cases/test_cases_{n}（每行一个真值表整数）
@@ -130,17 +144,21 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc,
                                           fused_backend=True, gl_search=gl_search,
                                           fprm_proxy=fprm_proxy, paths=paths)
+    tag = paths_tag(paths, fprm_proxy, gl_search)
 
-    out_t = open(f'data/our_cost/our_t_cost_{num_var}_{start}_{stop}.txt', 'w')
-    out_cx = open(f'data/our_cost/our_cx_cost_{num_var}_{start}_{stop}.txt', 'w')
-    out_bound = open(f'data/our_cost/our_deg_bound_{num_var}_{start}_{stop}.txt', 'w')
+    out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
+    out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
+    out_bound = open(f'data/our_cost/our_deg_bound_{tag}_{num_var}_{start}_{stop}.txt', 'w')
 
     ours_t, ours_cx, bounds = [], [], []
+    wall_ns = 0
     for i, tt in enumerate(cases):
         if i % 1000 == 0:
             print(i, flush=True)
         truth_table = TruthTable(tt, num_var)
+        t0 = time.perf_counter_ns()
         synthesizer.synthesize(truth_table)
+        wall_ns += time.perf_counter_ns() - t0
         t, cx = count_costs(to_qiskit(synthesizer.circ))
         bound = T_COST_FN(anf_degree(truth_table.bitstr, num_var))
 
@@ -155,8 +173,9 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     out_cx.close()
     out_bound.close()
 
-    print("****** Comparison of TDD-based Method Alg. 1 (fused backend, min(BDD,ANF,FPRM)) ******")
-    print(f"number of input variables: {num_var} ({total} cases)")
+    print("****** Comparison of TDD-based Method Alg. 1 (fused backend) ******")
+    print(f"number of input variables: {num_var} ({total} cases); paths={tag}")
+    print(f"avg synthesize wall: {wall_ns / max(total, 1) / 1e6:.2f} ms/例")
     _compare("Exorcism T", cases, ours_t, exor_t)
     _compare("Exorcism CX", cases, ours_cx, exor_cx)
     _compare("SSHR T", cases, ours_t, sshr_t)
