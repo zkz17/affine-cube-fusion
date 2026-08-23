@@ -97,11 +97,14 @@ def _compare(name, cases, ours, baseline):
     return (better, worse, same, worse_cases, s_base, s_ours)
 
 
-def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False):
+def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
+                 fprm_proxy=False):
     """
     融合后端与 Exorcism / SSHR 的对比（T 与 CX 双口径）。
 
-    gl_search=True 时启用 G-2.2 确定性 GL 搜索（时间换质量,n=7 约 +6s/例）。
+    gl_search=True   : 启用 G-2.2 确定性 GL 搜索（时间换质量,n=7 约 +6s/例）。
+    fprm_proxy=True  : 方案 A——F 路径由免融合代理预筛版**取代**(选择关系,
+                       非 min;n≥9 意图升级平移 climb2)。
 
     数据布局（2025-08-22 更新）：
       测例     data/test_cases/test_cases_{n}（每行一个真值表整数）
@@ -123,7 +126,8 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     _, sshr_cx = load_aligned(cases_path, f'data/sshr_cost/sshr_cx_cost_{num_var}', start, stop)
 
     synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc,
-                                          fused_backend=True, gl_search=gl_search)
+                                          fused_backend=True, gl_search=gl_search,
+                                          fprm_proxy=fprm_proxy)
 
     out_t = open(f'data/our_t_cost_{num_var}_{start}_{stop}.txt', 'w')
     out_cx = open(f'data/our_cx_cost_{num_var}_{start}_{stop}.txt', 'w')
@@ -166,11 +170,13 @@ def main():
     start   = int(sys.argv[4]) if len(sys.argv) >= 5 else 0
     stop    = int(sys.argv[5]) if len(sys.argv) >= 6 else None
     gl      = int(sys.argv[6]) if len(sys.argv) >= 7 else 0
+    proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
 
     if num_anc != 0:
         print('Warning: fused_backend 仅在 ancilla_num=0 时生效（当前 anc>0，将走旧路径）。')
 
-    evaluate_all(num_var, reorder > 0, num_anc, start, stop, gl_search=gl > 0)
+    evaluate_all(num_var, reorder > 0, num_anc, start, stop, gl_search=gl > 0,
+                 fprm_proxy=proxy > 0)
 
 
 if __name__ == "__main__":

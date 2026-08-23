@@ -17,6 +17,7 @@ from tests.test_fprm import main as fprm_suite
 from tests.test_degree_bound import main as degree_bound_suite
 from tests.test_cx_optim import main as cx_optim_suite
 from tests.test_gl_search import main as gl_search_suite
+from tests.test_fprm_proxy import main as fprm_proxy_suite
 
 def main():
     argparser = argparse.ArgumentParser(prog='Test Script')
@@ -35,6 +36,7 @@ def main():
     argparser.add_argument('-d', '--degree_bound_test' , action='store_true')
     argparser.add_argument('-x', '--cx_optim_test'     , action='store_true')
     argparser.add_argument('-u', '--gl_search_test'    , action='store_true')
+    argparser.add_argument('-w', '--fprm_proxy_test'   , action='store_true')
 
     args = argparser.parse_args()
 
@@ -73,6 +75,8 @@ def main():
         cx_optim_suite(verbose=args.verbose)
     if args.gl_search_test:
         gl_search_suite(verbose=args.verbose)
+    if args.fprm_proxy_test:
+        fprm_proxy_suite(verbose=args.verbose)
 
 if __name__ == '__main__':
     main()

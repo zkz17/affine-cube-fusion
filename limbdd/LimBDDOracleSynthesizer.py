@@ -7,13 +7,15 @@ from limbdd.fusion.FusedBackend import limbdd2circ_fused
 from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
 from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, shift_fn
 from limbdd.fusion.GLSearch import gl_search
+from limbdd.fusion.FprmProxy import fprm_proxy_best
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 from utils.to_qiskit import to_qiskit
 from config import config
 
 class LimBDDOracleSynthesizer:
-    def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False):
+    def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False,
+                 fprm_proxy=False):
         self.limbdd = None
         self.limbdd_mgr = LimBDDManager()
         self.qubit_mgr = QubitManager()
@@ -26,6 +28,9 @@ class LimBDDOracleSynthesizer:
         # G-2.2 可选开关（默认关闭）：确定性 GL(n,2) 局部搜索,时间换质量
         # (n=7 约 +6s/例,94% 是融合引擎本身——见 Optimization_roadmap.md G-2.2 节)
         self.gl_search = gl_search
+        # 方案 A 可选开关（默认关闭）：FPRM 免融合代理预筛 **取代** F 路径
+        # (选择关系而非 min;n≥9 意图升级现行平移 climb2,n≤8 质量低 12~28%)
+        self.fprm_proxy = fprm_proxy
 
     def clear(self):
         self.limbdd = None
@@ -179,7 +184,12 @@ class LimBDDOracleSynthesizer:
             kept_c, standalone_c = fuse_pool_global(entries_c, n)
 
             # ---- 路径 F：FPRM 平移子群搜索 ----
-            kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
+            # 方案 A(fprm_proxy=True)时用代理预筛版**取代**默认 F(选择关系,非 min);
+            # 恒含 c=0 ⇒ 代理结果 ≤ C(支配链保持)。
+            if self.fprm_proxy:
+                kept_f, standalone_f, shift_c = fprm_proxy_best(tt.bitstr, n)
+            else:
+                kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
 
             # 并列时优先级 A > C > F（保持与 F 接入之前 A/C 的并列行为一致）
             candidates = [
