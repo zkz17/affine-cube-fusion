@@ -26,15 +26,17 @@ class LimBDDOracleSynthesizer:
         # Phase 5 起：融合发射后端为 no-ancilla 路径的默认后端（ancilla_num>0 时静默忽略）
         self.fused_backend = fused_backend
         # G-2.2 可选开关（默认关闭）：确定性 GL(n,2) 局部搜索,时间换质量
-        # (n=7 约 +6s/例,94% 是融合引擎本身——见 Optimization_roadmap.md G-2.2 节)
+        # (n=7 约 +6s/例,94% 是融合引擎本身——见 Optimization_roadmap.md G-2.2 节)。
+        # 探索期纪律:G 为**独立选项**(不隐式携带 A);paths 组合的 min 只发生在
+        # 显式选中的路径之间,无任何隐藏的多路径求 min。
         self.gl_search = gl_search
         # 方案 A 可选开关（默认关闭）：FPRM 免融合代理预筛 **取代** F 路径
         # (选择关系而非 min;n≥9 意图升级现行平移 climb2,n≤8 质量低 12~28%)
         self.fprm_proxy = fprm_proxy
         # 路径选择(2025-08-22,探索期纪律):生产后端**暂时只跑 F 路径**;
         # 之后按每条路径的优化效果/运行时间逐路径评测,再定最终组合。
-        # paths 为 {'A','C','F'} 的子集,取其中最优者;gl_search=True 时改用
-        # G 路径(min(A,G)),忽略 paths。
+        # paths 为 {'A','C','F'} 的子集,min 只发生在显式选中的路径之间
+        # (选项互不重复);gl_search=True 时单独运行 G 选项,忽略 paths。
         assert set(paths) <= {'A', 'C', 'F'} and len(paths) >= 1, f'非法 paths: {paths}'
         self.paths = tuple(paths)
 
@@ -155,9 +157,10 @@ class LimBDDOracleSynthesizer:
         fprm_proxy=True 时 F 由免融合代理预筛版取代（选择关系,非 min）。
         并列优先级按 paths 中的给定顺序(默认 F 唯一,无并列问题)。
 
-        可选（gl_search=True，G-2.2）：忽略 paths,改用 G 路径(min(A,G))——
-        确定性 GL(n,2) 局部搜索（候选含 FPRM 最优 cF ⇒ G ≤ F ≤ C 支配链保持、
-        零回归;T 并列优先零 wrapper）。代价:n=7 约 +6s/例。
+        可选（gl_search=True，G-2.2）：忽略 paths,单独运行 **G 选项**——
+        确定性 GL(n,2) 局部搜索（候选含 FPRM 最优 cF ⇒ G ≤ F,相对 F 零回归;
+        T 并列优先零 wrapper）。探索期纪律:G 为独立选项,不再隐式 min(A,G)。
+        代价:n=7 约 +6s/例。
 
         注（2025-08-21）：C′ 路径（ANF 差一变量预合并,1.2/T-3）经实测后**暂时关闭**
         （端到端收益 −0.22%~−0.53% ΣT、代价 +23%~36% wall,处于决策临界区）;
@@ -170,13 +173,10 @@ class LimBDDOracleSynthesizer:
         n = tt.num_var
 
         if self.gl_search:
-            # ---- 路径 G：确定性 GL(n,2) 局部搜索(可选,时间换质量)----
-            kept_a, standalone_a = fuse_pool_global(self._bdd_entries(tt, path), n)
-            kept_g, standalone_g, shift_c, cnots = gl_search(tt.bitstr, n)
-            candidates = [
-                (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()),
-                (pool_t_cost(kept_g, standalone_g), kept_g, standalone_g, shift_c, tuple(cnots)),
-            ]
+            # ---- 选项 G:确定性 GL(n,2) 局部搜索(独立选项,无隐式 min)----
+            # 探索期纪律:任何「多路径取 min」都必须是显式选项;G 单独成项,
+            # 不再隐式携带 A。(G 内部候选含 cF ⇒ G ≤ F,零回归相对 F 保持。)
+            kept, standalone, shift_c, cnots = gl_search(tt.bitstr, n)
         else:
             candidates = []
             if 'A' in self.paths:
@@ -194,8 +194,8 @@ class LimBDDOracleSynthesizer:
                     kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
                 candidates.append((pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c, ()))
             assert candidates, 'paths 为空(构造时已校验,不应到达)'
-        best_cost = min(c[0] for c in candidates)
-        _, kept, standalone, shift_c, cnots = next(c for c in candidates if c[0] == best_cost)
+            best_cost = min(c[0] for c in candidates)
+            _, kept, standalone, shift_c, cnots = next(c for c in candidates if c[0] == best_cost)
 
         # ---- 发射：平移三明治 X(c)(shift_c=0 时 no-op)----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
