@@ -48,14 +48,11 @@ def count_cx_cost(circ):
 
 
 def paths_tag(paths, fprm_proxy, gl_search):
-    """路径组合标签(输出文件名用):gl → 'G';否则排序后的路径串,
-    fprm_proxy 时把其中的 F 替换为 FP。"""
+    """路径标签(输出文件名用):gl → 'G';单路径 A/C/F;fprm_proxy 且 F → 'FP'。"""
     if gl_search:
         return 'G'
-    p = ''.join(sorted(paths))
-    if fprm_proxy and 'F' in p:
-        p = p.replace('F', 'FP')
-    return p
+    assert paths in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
+    return 'FP' if (fprm_proxy and paths == 'F') else paths
 
 
 def load_aligned(cases_path, cost_path, start, stop):
@@ -117,8 +114,8 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     gl_search=True   : 启用 G-2.2 确定性 GL 搜索（时间换质量,n=7 约 +6s/例）。
     fprm_proxy=True  : 方案 A——F 路径由免融合代理预筛版**取代**(选择关系,
                        非 min;n≥9 意图升级平移 climb2)。
-    paths            : 生产后端路径选择(探索期纪律,默认 ('F',) 只跑 FPRM 路径;
-                       {'A','C','F'} 任意子集,仅计算所选路径并取最优)。
+    paths            : 单路径选择(探索期纪律,默认 'F';仅允许 'A'/'C'/'F',
+                       多路径组合在本阶段禁用;FP/G 经开关选择)。
     输出文件按路径组合分目录名:`data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
     tag = paths_tag(paths, fprm_proxy, gl_search)。
 
@@ -192,7 +189,9 @@ def main():
     stop    = int(sys.argv[5]) if len(sys.argv) >= 6 else None
     gl      = int(sys.argv[6]) if len(sys.argv) >= 7 else 0
     proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
-    paths   = tuple(sys.argv[8]) if len(sys.argv) >= 9 else ('F',)
+    paths   = sys.argv[8] if len(sys.argv) >= 9 else 'F'
+    assert paths in ('A', 'C', 'F'), f'非法 paths(仅允许 A/C/F 单路径): {paths}'
+    paths = (paths,)
 
     if num_anc != 0:
         print('Warning: fused_backend 仅在 ancilla_num=0 时生效（当前 anc>0，将走旧路径）。')

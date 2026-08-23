@@ -33,12 +33,16 @@ class LimBDDOracleSynthesizer:
         # 方案 A 可选开关（默认关闭）：FPRM 免融合代理预筛 **取代** F 路径
         # (选择关系而非 min;n≥9 意图升级现行平移 climb2,n≤8 质量低 12~28%)
         self.fprm_proxy = fprm_proxy
-        # 路径选择(2025-08-22,探索期纪律):生产后端**暂时只跑 F 路径**;
-        # 之后按每条路径的优化效果/运行时间逐路径评测,再定最终组合。
-        # paths 为 {'A','C','F'} 的子集,min 只发生在显式选中的路径之间
-        # (选项互不重复);gl_search=True 时单独运行 G 选项,忽略 paths。
-        assert set(paths) <= {'A', 'C', 'F'} and len(paths) >= 1, f'非法 paths: {paths}'
-        self.paths = tuple(paths)
+        # 路径选择(2025-08-22,探索期纪律):**单路径专用**——paths 为单字符
+        # 'A'/'C'/'F'(或仅含其一的元组);多路径组合(显式 min)在本阶段禁用,不测。
+        # 实际测试路径 = A / C / F / FP(代理开关)/ G(gl 开关)。
+        # gl_search=True 时单独运行 G 选项,忽略 paths。
+        if isinstance(paths, (tuple, list)):
+            assert len(paths) == 1 and paths[0] in ('A', 'C', 'F'),                 f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
+            self.paths = tuple(paths)
+        else:
+            assert paths in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
+            self.paths = (paths,)
 
     def clear(self):
         self.limbdd = None

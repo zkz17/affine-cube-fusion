@@ -14,10 +14,11 @@ def random_tt(num_vars):
 
 def _synth_pair(tt, reorder):
     old = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=False)
-    # 注(2025-08-22):生产默认已改为 paths=('F',)(探索期),本测试验证的是
-    # **融合后端全家族**对旧后端的零劣化,故显式取 min(A,C,F) 口径。
+    # 注(2025-08-22):多路径组合在本阶段禁用;本测试验证**A 路径融合后端**
+    # 对旧后端的零劣化——融合只降不升,且旧后端发射代价 = 原始池 ΣT,
+    # 故 paths=('A',) 的融合代价逐例 ≤ 旧后端。
     new = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True,
-                                  paths=('A', 'C', 'F'))
+                                  paths=('A',))
     old.synthesize(tt)
     new.synthesize(tt)
     return old, new
