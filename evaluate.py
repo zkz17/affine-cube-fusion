@@ -98,21 +98,23 @@ def _compare(name, cases, ours, baseline):
 
 
 def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
-                 fprm_proxy=False):
+                 fprm_proxy=False, paths=('F',)):
     """
     融合后端与 Exorcism / SSHR 的对比（T 与 CX 双口径）。
 
     gl_search=True   : 启用 G-2.2 确定性 GL 搜索（时间换质量,n=7 约 +6s/例）。
     fprm_proxy=True  : 方案 A——F 路径由免融合代理预筛版**取代**(选择关系,
                        非 min;n≥9 意图升级平移 climb2)。
+    paths            : 生产后端路径选择(探索期纪律,默认 ('F',) 只跑 FPRM 路径;
+                       {'A','C','F'} 任意子集,仅计算所选路径并取最优)。
 
     数据布局（2025-08-22 更新）：
       测例     data/test_cases/test_cases_{n}（每行一个真值表整数）
       基线     data/exorcism_cost/exorcism_{t,cx}_cost_{n}、data/sshr_cost/sshr_{t,cx}_cost_{n}
       （按行号与测例对齐;sshr n≥7 暂空 → 自动跳过该对比）
     输出:
-      data/our_t_cost_{n}_{start}_{stop}.txt、data/our_cx_cost_{n}_{start}_{stop}.txt
-      data/our_deg_bound_{n}_{start}_{stop}.txt（G-3 下界）
+      data/our_cost/our_{t,cx}_cost_{n}_{start}_{stop}.txt、
+      data/our_cost/our_deg_bound_{n}_{start}_{stop}.txt（G-3 下界）
     """
     cases_path = f'data/test_cases/test_cases_{num_var}'
     with open(cases_path) as f:
@@ -127,11 +129,11 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
 
     synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc,
                                           fused_backend=True, gl_search=gl_search,
-                                          fprm_proxy=fprm_proxy)
+                                          fprm_proxy=fprm_proxy, paths=paths)
 
-    out_t = open(f'data/our_t_cost_{num_var}_{start}_{stop}.txt', 'w')
-    out_cx = open(f'data/our_cx_cost_{num_var}_{start}_{stop}.txt', 'w')
-    out_bound = open(f'data/our_deg_bound_{num_var}_{start}_{stop}.txt', 'w')
+    out_t = open(f'data/our_cost/our_t_cost_{num_var}_{start}_{stop}.txt', 'w')
+    out_cx = open(f'data/our_cost/our_cx_cost_{num_var}_{start}_{stop}.txt', 'w')
+    out_bound = open(f'data/our_cost/our_deg_bound_{num_var}_{start}_{stop}.txt', 'w')
 
     ours_t, ours_cx, bounds = [], [], []
     for i, tt in enumerate(cases):
@@ -171,12 +173,13 @@ def main():
     stop    = int(sys.argv[5]) if len(sys.argv) >= 6 else None
     gl      = int(sys.argv[6]) if len(sys.argv) >= 7 else 0
     proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
+    paths   = tuple(sys.argv[8]) if len(sys.argv) >= 9 else ('F',)
 
     if num_anc != 0:
         print('Warning: fused_backend 仅在 ancilla_num=0 时生效（当前 anc>0，将走旧路径）。')
 
     evaluate_all(num_var, reorder > 0, num_anc, start, stop, gl_search=gl > 0,
-                 fprm_proxy=proxy > 0)
+                 fprm_proxy=proxy > 0, paths=paths)
 
 
 if __name__ == "__main__":

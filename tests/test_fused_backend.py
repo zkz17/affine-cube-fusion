@@ -14,7 +14,10 @@ def random_tt(num_vars):
 
 def _synth_pair(tt, reorder):
     old = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=False)
-    new = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True)
+    # 注(2025-08-22):生产默认已改为 paths=('F',)(探索期),本测试验证的是
+    # **融合后端全家族**对旧后端的零劣化,故显式取 min(A,C,F) 口径。
+    new = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True,
+                                  paths=('A', 'C', 'F'))
     old.synthesize(tt)
     new.synthesize(tt)
     return old, new

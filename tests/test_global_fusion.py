@@ -108,7 +108,10 @@ def test_global_backend_equivalence(num_vars=5, rounds=300, verbose=False):
     for i in range(rounds):
         tt = random_tt(num_vars)
         old = LimBDDOracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=False)
-        new = LimBDDOracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=True)
+        # 注(2025-08-22):生产默认已改为 paths=('F',);本测试验证融合后端全家族
+        # 对旧后端的零劣化,故显式取 min(A,C,F) 口径。
+        new = LimBDDOracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=True,
+                                      paths=('A', 'C', 'F'))
         old.synthesize(tt)
         new.synthesize(tt)
         assert old.circ.verify(tt), f'旧后端验证失败: {tt}'
@@ -132,7 +135,8 @@ def test_global_backend_stats(n4=200, n6=100, n7=30, verbose=False):
         rng_tts = [random_tt(num_vars) for _ in range(rounds)]
         for i, tt in enumerate(rng_tts):
             old = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=False)
-            new = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+            new = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+                                          paths=('A', 'C', 'F'))
             old.synthesize(tt)
             new.synthesize(tt)
             assert old.circ.verify(tt) and new.circ.verify(tt), f'验证失败: {tt}'

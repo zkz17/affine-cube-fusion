@@ -15,7 +15,7 @@ from config import config
 
 class LimBDDOracleSynthesizer:
     def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False,
-                 fprm_proxy=False):
+                 fprm_proxy=False, paths=('F',)):
         self.limbdd = None
         self.limbdd_mgr = LimBDDManager()
         self.qubit_mgr = QubitManager()
@@ -31,6 +31,12 @@ class LimBDDOracleSynthesizer:
         # 方案 A 可选开关（默认关闭）：FPRM 免融合代理预筛 **取代** F 路径
         # (选择关系而非 min;n≥9 意图升级现行平移 climb2,n≤8 质量低 12~28%)
         self.fprm_proxy = fprm_proxy
+        # 路径选择(2025-08-22,探索期纪律):生产后端**暂时只跑 F 路径**;
+        # 之后按每条路径的优化效果/运行时间逐路径评测,再定最终组合。
+        # paths 为 {'A','C','F'} 的子集,取其中最优者;gl_search=True 时改用
+        # G 路径(min(A,G)),忽略 paths。
+        assert set(paths) <= {'A', 'C', 'F'} and len(paths) >= 1, f'非法 paths: {paths}'
+        self.paths = tuple(paths)
 
     def clear(self):
         self.limbdd = None
@@ -137,66 +143,57 @@ class LimBDDOracleSynthesizer:
 
     def process_fused_global(self, tt, path=None):
         """
-        Phase 5+：min(BDD, ANF) 全局融合后端（默认 no-ancilla 路径）。
+        Phase 5+：全局融合后端（默认 no-ancilla 路径）。
 
-        默认（gl_search=False）三条分解路径同跑、取融合后 ΣT 较小者：
-          A. BDD 路径：图阶段与 process() 逐行同构（try_neg / split_neg / reorder /
-             分片与吸收时序），全部子图的分支（各携带片根掩码 r）进全局融合池；
-          C. ANF 路径：真值表 → Möbius 变换 → 单项式池（序无关规范分解），无图阶段；
-          F. FPRM 路径（阶段 3 / G-2.1）：平移子群上搜索最优 c，
-             g(x) = f(x⊕c) 重新 Möbius + 融合；电路 = X(c) 三明治（T 免费）。
-             预算策略（阶段 3.1-C 决策）：n ≤ 8 全枚举 2^n；n ≥ 9 climb2
-             （0/全 1 双起点最陡上升，确定性）。c=0 即 C 路径 ⇒ 结构性零回归。
-             并列优先级 A > C > F。
+        路径选择(探索期纪律,2025-08-22):生产后端**暂时只跑 F 路径**(paths 默认
+        ('F',));paths 为 {'A','C','F'} 的任意子集,仅计算所选路径并取其中最优。
+          A. BDD 路径：图阶段（try_neg / split_neg / reorder / 拆分,absorb 已移除）
+             → 分支池 → 全局融合；
+          C. ANF 路径：真值表 → Möbius → 单项式池（c=0）；
+          F. FPRM 路径（G-2.1）：平移子群上搜索最优 c（n≤8 全枚举 2^n；
+             n≥9 climb2 双起点,确定性）；电路 = X(c) 三明治（T 免费）。
+        fprm_proxy=True 时 F 由免融合代理预筛版取代（选择关系,非 min）。
+        并列优先级按 paths 中的给定顺序(默认 F 唯一,无并列问题)。
 
-        可选（gl_search=True，G-2.2）：路径 C/F 由 G 取代——
-        确定性 GL(n,2) 局部搜索（起点 = 恒等 + 全部单 CNOT,最陡上升;候选含
-        FPRM 最优 cF 本身 ⇒ G ≤ F ≤ C 支配链保持、零回归;T 并列优先零 wrapper）。
-        代价：n=7 约 +6s/例（94% 为融合引擎,见 Optimization_roadmap.md G-2.2 节）。
+        可选（gl_search=True，G-2.2）：忽略 paths,改用 G 路径(min(A,G))——
+        确定性 GL(n,2) 局部搜索（候选含 FPRM 最优 cF ⇒ G ≤ F ≤ C 支配链保持、
+        零回归;T 并列优先零 wrapper）。代价:n=7 约 +6s/例。
 
         注（2025-08-21）：C′ 路径（ANF 差一变量预合并,1.2/T-3）经实测后**暂时关闭**
         （端到端收益 −0.22%~−0.53% ΣT、代价 +23%~36% wall,处于决策临界区）;
         `BranchFusion.anf_pool_premerged` 与 `tests/test_premerge.py` 保留,随时可重新接入。
 
-        发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)，同 r 的多片可安全合并），
-        融合段（r=0）独立发射（自包含对合，位置无关）；FPRM 获胜时整体包 X(c) 三明治;
-        gl_search 开启时改用 G 路径（见下）并包 CNOT(A⁻¹)/CNOT(A) 线性三明治;
-        末尾 simplify_terms。
+        发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)），融合段（r=0）独立
+        发射；F/FP 获胜时整体包 X(c) 三明治;G 获胜时包 CNOT(A⁻¹)/CNOT(A) 线性
+        三明治;末尾 simplify_terms。
         """
         n = tt.num_var
 
-        # ---- 路径 A：BDD 分解 ----
-        entries_a = self._bdd_entries(tt, path)
-        kept_a, standalone_a = fuse_pool_global(entries_a, n)
-
         if self.gl_search:
             # ---- 路径 G：确定性 GL(n,2) 局部搜索(可选,时间换质量)----
-            # G 的候选含 cF 本身(零 wrapper)⇒ G ≤ F ≤ C 支配链保持;
-            # 并列时优先零 wrapper,故 CX 不因并列多付。此处不再单独跑 C/F。
+            kept_a, standalone_a = fuse_pool_global(self._bdd_entries(tt, path), n)
             kept_g, standalone_g, shift_c, cnots = gl_search(tt.bitstr, n)
             candidates = [
                 (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()),
                 (pool_t_cost(kept_g, standalone_g), kept_g, standalone_g, shift_c, tuple(cnots)),
             ]
         else:
-            # ---- 路径 C：ANF 分解 ----
-            entries_c = anf_pool(tt.bitstr, n)
-            kept_c, standalone_c = fuse_pool_global(entries_c, n)
-
-            # ---- 路径 F：FPRM 平移子群搜索 ----
-            # 方案 A(fprm_proxy=True)时用代理预筛版**取代**默认 F(选择关系,非 min);
-            # 恒含 c=0 ⇒ 代理结果 ≤ C(支配链保持)。
-            if self.fprm_proxy:
-                kept_f, standalone_f, shift_c = fprm_proxy_best(tt.bitstr, n)
-            else:
-                kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
-
-            # 并列时优先级 A > C > F（保持与 F 接入之前 A/C 的并列行为一致）
-            candidates = [
-                (pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()),
-                (pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0, ()),
-                (pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c, ()),
-            ]
+            candidates = []
+            if 'A' in self.paths:
+                kept_a, standalone_a = fuse_pool_global(self._bdd_entries(tt, path), n)
+                candidates.append((pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()))
+            if 'C' in self.paths:
+                entries_c = anf_pool(tt.bitstr, n)
+                kept_c, standalone_c = fuse_pool_global(entries_c, n)
+                candidates.append((pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0, ()))
+            if 'F' in self.paths:
+                # 方案 A(fprm_proxy=True)时用代理预筛版**取代**默认 F(选择关系,非 min)
+                if self.fprm_proxy:
+                    kept_f, standalone_f, shift_c = fprm_proxy_best(tt.bitstr, n)
+                else:
+                    kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
+                candidates.append((pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c, ()))
+            assert candidates, 'paths 为空(构造时已校验,不应到达)'
         best_cost = min(c[0] for c in candidates)
         _, kept, standalone, shift_c, cnots = next(c for c in candidates if c[0] == best_cost)
 
