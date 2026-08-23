@@ -51,8 +51,9 @@ def paths_tag(paths, fprm_proxy, gl_search):
     """路径标签(输出文件名用):gl → 'G';单路径 A/C/F;fprm_proxy 且 F → 'FP'。"""
     if gl_search:
         return 'G'
-    assert paths in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
-    return 'FP' if (fprm_proxy and paths == 'F') else paths
+    p = paths[0] if isinstance(paths, (tuple, list)) else paths
+    assert p in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
+    return 'FP' if (fprm_proxy and p == 'F') else p
 
 
 def load_aligned(cases_path, cost_path, start, stop):
@@ -77,10 +78,9 @@ def load_aligned(cases_path, cost_path, start, stop):
 
 
 def _compare(name, cases, ours, baseline):
-    """单口径对比;baseline 为 None 时跳过。"""
+    """单口径对比;baseline 为 None 时跳过。返回报告行列表。"""
     if baseline is None:
-        print(f"===== {name}:基线缺失,跳过 =====")
-        return None
+        return [f"===== {name}:基线缺失,跳过 ====="]
     better, worse, same = 0, 0, 0
     worse_cases = []
     s_base = s_ours = 0
@@ -96,14 +96,15 @@ def _compare(name, cases, ours, baseline):
             same += 1
         else:
             better += 1
-    print(f"===== {name} =====")
-    print(f"lower  cost in {better}({better / len(cases) * 100}%) cases")
-    print(f"higher cost in {worse}({worse / len(cases) * 100}%) cases")
-    print(f"same   cost in {same}({same / len(cases) * 100}%) cases")
-    print(f"cases with higher cost: {worse_cases[:min(len(worse_cases), 20)]}")
-    print(f"total cost: baseline {s_base}, ours {s_ours} "
-          f"(缩减 {1 - s_ours / max(1, s_base):.2%})")
-    return (better, worse, same, worse_cases, s_base, s_ours)
+    return [
+        f"===== {name} =====",
+        f"lower  cost in {better}({better / len(cases) * 100}%) cases",
+        f"higher cost in {worse}({worse / len(cases) * 100}%) cases",
+        f"same   cost in {same}({same / len(cases) * 100}%) cases",
+        f"cases with higher cost: {worse_cases[:min(len(worse_cases), 20)]}",
+        f"total cost: baseline {s_base}, ours {s_ours} "
+        f"(缩减 {1 - s_ours / max(1, s_base):.2%})",
+    ]
 
 
 def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
@@ -170,15 +171,22 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     out_cx.close()
     out_bound.close()
 
-    print("****** Comparison of TDD-based Method Alg. 1 (fused backend) ******")
-    print(f"number of input variables: {num_var} ({total} cases); paths={tag}")
-    print(f"avg synthesize wall: {wall_ns / max(total, 1) / 1e6:.2f} ms/例")
-    _compare("Exorcism T", cases, ours_t, exor_t)
-    _compare("Exorcism CX", cases, ours_cx, exor_cx)
-    _compare("SSHR T", cases, ours_t, sshr_t)
-    _compare("SSHR CX", cases, ours_cx, sshr_cx)
-    print(f"G-3 下界: Σ t(deg f) = {sum(bounds)} (为 ours ΣT 的 {sum(bounds) / max(1, sum(ours_t)):.2%})")
-    print("****** ****** ******")
+    avg_wall_ms = wall_ns / max(total, 1) / 1e6
+    report = [f"****** Comparison of TDD-based Method Alg. 1 (fused backend) ******",
+              f"number of input variables: {num_var} ({total} cases); paths={tag}",
+              f"avg synthesize wall: {avg_wall_ms:.2f} ms/例"]
+    report += _compare("Exorcism T", cases, ours_t, exor_t)
+    report += _compare("Exorcism CX", cases, ours_cx, exor_cx)
+    report += _compare("SSHR T", cases, ours_t, sshr_t)
+    report += _compare("SSHR CX", cases, ours_cx, sshr_cx)
+    report.append(f"G-3 下界: Σ t(deg f) = {sum(bounds)} "
+                  f"(为 ours ΣT 的 {sum(bounds) / max(1, sum(ours_t)):.2%})")
+    report.append("****** ****** ******")
+
+    text = '\n'.join(report) + '\n'
+    with open(f'data/our_cost/our_results_{tag}_{num_var}_{start}_{stop}.txt', 'w') as f:
+        f.write(text)
+    print(text, end='')
 
 
 def main():
@@ -191,7 +199,6 @@ def main():
     proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
     paths   = sys.argv[8] if len(sys.argv) >= 9 else 'F'
     assert paths in ('A', 'C', 'F'), f'非法 paths(仅允许 A/C/F 单路径): {paths}'
-    paths = (paths,)
 
     if num_anc != 0:
         print('Warning: fused_backend 仅在 ancilla_num=0 时生效（当前 anc>0，将走旧路径）。')
