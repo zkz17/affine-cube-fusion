@@ -108,7 +108,7 @@ def _compare(name, cases, ours, baseline):
 
 
 def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
-                 fprm_proxy=False, paths=('F',)):
+                 fprm_proxy=False, paths=('F',), m2_post=False):
     """
     融合后端与 Exorcism / SSHR 的对比（T 与 CX 双口径）。
 
@@ -117,8 +117,10 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                        非 min;n≥9 意图升级平移 climb2)。
     paths            : 单路径选择(探索期纪律,默认 'F';仅允许 'A'/'C'/'F',
                        多路径组合在本阶段禁用;FP/G 经开关选择)。
+    m2_post=True     : 宏 M2 相间后处理(默认关闭;T 端逐例零回归,时间
+                       n≤7 0.1~2.9ms/例;CX 影响量测定稿前不默认开启)。
     输出文件按路径组合分目录名:`data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
-    tag = paths_tag(paths, fprm_proxy, gl_search)。
+    tag = paths_tag(paths, fprm_proxy, gl_search) + ('_M2' if m2_post else '')。
 
     数据布局（2025-08-22 更新）：
       测例     data/test_cases/test_cases_{n}（每行一个真值表整数）
@@ -141,8 +143,9 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
 
     synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc,
                                           fused_backend=True, gl_search=gl_search,
-                                          fprm_proxy=fprm_proxy, paths=paths)
-    tag = paths_tag(paths, fprm_proxy, gl_search)
+                                          fprm_proxy=fprm_proxy, paths=paths,
+                                          m2_post=m2_post)
+    tag = paths_tag(paths, fprm_proxy, gl_search) + ('_M2' if m2_post else '')
 
     out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
     out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
@@ -198,13 +201,15 @@ def main():
     gl      = int(sys.argv[6]) if len(sys.argv) >= 7 else 0
     proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
     paths   = sys.argv[8] if len(sys.argv) >= 9 else 'F'
+    m2      = int(sys.argv[9]) if len(sys.argv) >= 10 else 0
     assert paths in ('A', 'C', 'F'), f'非法 paths(仅允许 A/C/F 单路径): {paths}'
+    assert m2 in (0, 1), f'非法 m2 开关(0/1): {m2}'
 
     if num_anc != 0:
         print('Warning: fused_backend 仅在 ancilla_num=0 时生效（当前 anc>0，将走旧路径）。')
 
     evaluate_all(num_var, reorder > 0, num_anc, start, stop, gl_search=gl > 0,
-                 fprm_proxy=proxy > 0, paths=paths)
+                 fprm_proxy=proxy > 0, paths=paths, m2_post=m2 > 0)
 
 
 if __name__ == "__main__":

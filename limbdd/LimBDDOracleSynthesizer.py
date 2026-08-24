@@ -8,6 +8,7 @@ from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
 from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, shift_fn
 from limbdd.fusion.GLSearch import gl_search
 from limbdd.fusion.FprmProxy import fprm_proxy_best
+from limbdd.fusion.MacroM2 import m2_interleaved
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 from utils.to_qiskit import to_qiskit
@@ -15,7 +16,7 @@ from config import config
 
 class LimBDDOracleSynthesizer:
     def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False,
-                 fprm_proxy=False, paths=('F',)):
+                 fprm_proxy=False, paths=('F',), m2_post=False):
         self.limbdd = None
         self.limbdd_mgr = LimBDDManager()
         self.qubit_mgr = QubitManager()
@@ -43,6 +44,11 @@ class LimBDDOracleSynthesizer:
         else:
             assert paths in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
             self.paths = (paths,)
+        # 宏 M2 相间后处理开关(2025-08-22,P9 后接入,**默认关闭**):获胜池
+        # 融合不动点上做 {A,B,C}→{B⊕h,(A⊕h)⊕C} 严格下降宏(docs/macro_m2_theory.md),
+        # T 端逐例零回归;时间 n≤7 实测 0.1~2.9ms/例。CX 影响待 n≤7 量测后
+        # 再定默认值(量测前不开启,避免改变 G≤F 结构性零回归链的对照口径)。
+        self.m2_post = m2_post
 
     def clear(self):
         self.limbdd = None
@@ -62,6 +68,10 @@ class LimBDDOracleSynthesizer:
 
         self.clear()
         if self.fused_backend and self.ancilla_num == 0:
+            # 融合后端跳过 construct(不建 BDD),须显式分配全部输入量子位:
+            # 否则首段不触碰某输入时该 qubit 惰性缺失,compute_tt 会在缩小的
+            # 变量空间上枚举(回归例:n=4 tt=64560,cF=0 且首段只用 qubit 1/2/3)。
+            self.allocate_input_qubit(tt.num_var)
             self.process_fused_global(tt, path)   # Phase 5+：min(BDD, ANF) 全局融合后端
             return
 
@@ -170,6 +180,10 @@ class LimBDDOracleSynthesizer:
         （端到端收益 −0.22%~−0.53% ΣT、代价 +23%~36% wall,处于决策临界区）;
         `BranchFusion.anf_pool_premerged` 与 `tests/test_premerge.py` 保留,随时可重新接入。
 
+        可选（m2_post=True，宏 M2 相间后处理,默认关闭):获胜池融合不动点上
+        追加严格下降宏 {A,B,C}→{B⊕h,(A⊕h)⊕C}(docs/macro_m2_theory.md;T 端
+        逐例零回归,时间 n≤7 0.1~2.9ms/例);开关在 n≤7 T/CX 量测定稿前不默认开启。
+
         发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)），融合段（r=0）独立
         发射；F/FP 获胜时整体包 X(c) 三明治;G 获胜时包 CNOT(A⁻¹)/CNOT(A) 线性
         三明治;末尾 simplify_terms。
@@ -181,14 +195,20 @@ class LimBDDOracleSynthesizer:
             # 探索期纪律:任何「多路径取 min」都必须是显式选项;G 单独成项,
             # 不再隐式携带 A。(G 内部候选含 cF ⇒ G ≤ F,零回归相对 F 保持。)
             kept, standalone, shift_c, cnots = gl_search(tt.bitstr, n)
+            if self.m2_post:
+                kept, standalone = m2_interleaved(kept, standalone, n)
         else:
             candidates = []
             if 'A' in self.paths:
                 kept_a, standalone_a = fuse_pool_global(self._bdd_entries(tt, path), n)
+                if self.m2_post:
+                    kept_a, standalone_a = m2_interleaved(kept_a, standalone_a, n)
                 candidates.append((pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()))
             if 'C' in self.paths:
                 entries_c = anf_pool(tt.bitstr, n)
                 kept_c, standalone_c = fuse_pool_global(entries_c, n)
+                if self.m2_post:
+                    kept_c, standalone_c = m2_interleaved(kept_c, standalone_c, n)
                 candidates.append((pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0, ()))
             if 'F' in self.paths:
                 # 方案 A(fprm_proxy=True)时用代理预筛版**取代**默认 F(选择关系,非 min)
@@ -196,6 +216,8 @@ class LimBDDOracleSynthesizer:
                     kept_f, standalone_f, shift_c = fprm_proxy_best(tt.bitstr, n)
                 else:
                     kept_f, standalone_f, shift_c = self._fprm_entries(tt, n)
+                if self.m2_post:
+                    kept_f, standalone_f = m2_interleaved(kept_f, standalone_f, n)
                 candidates.append((pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c, ()))
             assert candidates, 'paths 为空(构造时已校验,不应到达)'
             best_cost = min(c[0] for c in candidates)

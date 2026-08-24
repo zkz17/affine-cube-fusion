@@ -110,11 +110,32 @@ def test_flag_fallback(num_vars=5, rounds=20):
     print(f'Fused backend flag fallback test passed!!! ({ok}/{rounds} verified)')
 
 
+def test_input_allocation_regression():
+    """回归(2025-08-22):融合后端跳过 construct 时输入量子位曾惰性缺失。
+
+    例 fn=64560(n=4):F 路径 cF=0 且首段只用 qubit 1/2/3,qubit 0 从未分配,
+    compute_tt 在 3 变量空间枚举,发射电路 tt 错位(输出 0)。现 synthesize
+    在融合路径入口显式分配全部输入量子位。
+    """
+    print('Testing fused backend input allocation regression...')
+
+    tt = TruthTable(64560, 4)
+    for cfg in ((False, False, ('F',)), (False, False, ('A',)),
+                (False, False, ('C',)), (False, True, ('F',)), (True, False, ('F',))):
+        gl, proxy, paths = cfg
+        s = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+                                    gl_search=gl, fprm_proxy=proxy, paths=paths)
+        s.synthesize(tt)
+        assert s.circ.verify(tt), f'输入分配回归: 配置 {cfg} 发射 tt 错位'
+    print('Fused backend input allocation regression test passed!!!')
+
+
 def main():
     test_backend_equivalence()
     test_simplify_preserves_semantics()
     test_differential_stats_larger()
     test_flag_fallback()
+    test_input_allocation_regression()
 
 
 if __name__ == '__main__':
