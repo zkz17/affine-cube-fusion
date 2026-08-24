@@ -118,9 +118,11 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     paths            : 单路径选择(探索期纪律,默认 'F';仅允许 'A'/'C'/'F',
                        多路径组合在本阶段禁用;FP/G 经开关选择)。
     m2_post=True     : 宏 M2 相间后处理(**默认开启**;T 端逐例零回归,n≤7 全量
-                       测例 CX 劣化 0 例,时间 0~2.3ms/例;m2=0 可回到旧口径)。
+                       测例 CX 劣化 0 例;m2=0 仅调试用,输出文件与默认口径
+                       同名,勿与正式数据混用)。
     输出文件按路径组合分目录名:`data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
-    tag = paths_tag(paths, fprm_proxy, gl_search) + ('_M2' if m2_post else '')。
+    tag = paths_tag(paths, fprm_proxy, gl_search)(2025-08-22 起不再区分 M2:
+    融合后端默认 M2 强化,历史数据将重跑)。
 
     数据布局（2025-08-22 更新）：
       测例     data/test_cases/test_cases_{n}（每行一个真值表整数）
@@ -145,7 +147,7 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                                           fused_backend=True, gl_search=gl_search,
                                           fprm_proxy=fprm_proxy, paths=paths,
                                           m2_post=m2_post)
-    tag = paths_tag(paths, fprm_proxy, gl_search) + ('_M2' if m2_post else '')
+    tag = paths_tag(paths, fprm_proxy, gl_search)
 
     out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
     out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
