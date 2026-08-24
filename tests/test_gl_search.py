@@ -22,11 +22,17 @@ def random_tt(num_vars):
 
 
 def test_gl_zero_regression(num_vars=5, rounds=40, verbose=False):
-    """gl 开启的 T 逐例不劣于默认路径。"""
+    """gl 开启的 T 逐例不劣于默认路径。
+
+    注(2025-08-22):m2_post 已默认开启;本断言保持**结构性口径**——
+    对照侧显式 m2_post=False(G 候选含 FPRM 最优 cF ⇒ 结构性保证)。
+    m2_post 两侧同开时的 G_on ≤ F_on 为经验性(P9-M 样本 46/46),非约束。
+    """
     print(f'Testing GL zero-regression with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
-    off = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True, gl_search=False)
+    off = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True, gl_search=False,
+                                  m2_post=False)
     on = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True, gl_search=True)
     better = same = 0
     for _ in range(rounds):

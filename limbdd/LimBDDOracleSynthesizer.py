@@ -16,7 +16,7 @@ from config import config
 
 class LimBDDOracleSynthesizer:
     def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False,
-                 fprm_proxy=False, paths=('F',), m2_post=False):
+                 fprm_proxy=False, paths=('F',), m2_post=True):
         self.limbdd = None
         self.limbdd_mgr = LimBDDManager()
         self.qubit_mgr = QubitManager()
@@ -44,10 +44,13 @@ class LimBDDOracleSynthesizer:
         else:
             assert paths in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
             self.paths = (paths,)
-        # 宏 M2 相间后处理开关(2025-08-22,P9 后接入,**默认关闭**):获胜池
-        # 融合不动点上做 {A,B,C}→{B⊕h,(A⊕h)⊕C} 严格下降宏(docs/macro_m2_theory.md),
-        # T 端逐例零回归;时间 n≤7 实测 0.1~2.9ms/例。CX 影响待 n≤7 量测后
-        # 再定默认值(量测前不开启,避免改变 G≤F 结构性零回归链的对照口径)。
+        # 宏 M2 相间后处理开关(2025-08-22,P9 后接入;2025-08-22 定稿**默认开启**):
+        # 获胜池融合不动点上做 {A,B,C}→{B⊕h,(A⊕h)⊕C} 严格下降宏
+        # (docs/macro_m2_theory.md),T 端逐例零回归、n≤7 全量测例 CX 劣化 0 例,
+        # 时间 0~2.3ms/例(相对 F 的 2^n 平移全枚举/FP 的代理预筛可忽略)。
+        # 注:开启后 G≤F 零回归链降级为经验性(G 池上 M2 机会通常为 0,F 上
+        # 偶发 —G 是慢速强化选项而非生产默认,该链不作为约束;结构性对照见
+        # tests/test_gl_search.py 显式 m2_post=False 口径)。
         self.m2_post = m2_post
 
     def clear(self):
@@ -180,9 +183,10 @@ class LimBDDOracleSynthesizer:
         （端到端收益 −0.22%~−0.53% ΣT、代价 +23%~36% wall,处于决策临界区）;
         `BranchFusion.anf_pool_premerged` 与 `tests/test_premerge.py` 保留,随时可重新接入。
 
-        可选（m2_post=True，宏 M2 相间后处理,默认关闭):获胜池融合不动点上
+        可选（m2_post=True，宏 M2 相间后处理,**默认开启**):获胜池融合不动点上
         追加严格下降宏 {A,B,C}→{B⊕h,(A⊕h)⊕C}(docs/macro_m2_theory.md;T 端
-        逐例零回归,时间 n≤7 0.1~2.9ms/例);开关在 n≤7 T/CX 量测定稿前不默认开启。
+        逐例零回归、n≤7 全量测例 CX 劣化 0 例,时间 0~2.3ms/例;m2_post=False
+        可完全回到旧口径,用于结构性对照)。
 
         发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)），融合段（r=0）独立
         发射；F/FP 获胜时整体包 X(c) 三明治;G 获胜时包 CNOT(A⁻¹)/CNOT(A) 线性

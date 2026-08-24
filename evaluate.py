@@ -108,7 +108,7 @@ def _compare(name, cases, ours, baseline):
 
 
 def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
-                 fprm_proxy=False, paths=('F',), m2_post=False):
+                 fprm_proxy=False, paths=('F',), m2_post=True):
     """
     融合后端与 Exorcism / SSHR 的对比（T 与 CX 双口径）。
 
@@ -117,8 +117,8 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                        非 min;n≥9 意图升级平移 climb2)。
     paths            : 单路径选择(探索期纪律,默认 'F';仅允许 'A'/'C'/'F',
                        多路径组合在本阶段禁用;FP/G 经开关选择)。
-    m2_post=True     : 宏 M2 相间后处理(默认关闭;T 端逐例零回归,时间
-                       n≤7 0.1~2.9ms/例;CX 影响量测定稿前不默认开启)。
+    m2_post=True     : 宏 M2 相间后处理(**默认开启**;T 端逐例零回归,n≤7 全量
+                       测例 CX 劣化 0 例,时间 0~2.3ms/例;m2=0 可回到旧口径)。
     输出文件按路径组合分目录名:`data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
     tag = paths_tag(paths, fprm_proxy, gl_search) + ('_M2' if m2_post else '')。
 
@@ -201,7 +201,7 @@ def main():
     gl      = int(sys.argv[6]) if len(sys.argv) >= 7 else 0
     proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
     paths   = sys.argv[8] if len(sys.argv) >= 9 else 'F'
-    m2      = int(sys.argv[9]) if len(sys.argv) >= 10 else 0
+    m2      = int(sys.argv[9]) if len(sys.argv) >= 10 else 1
     assert paths in ('A', 'C', 'F'), f'非法 paths(仅允许 A/C/F 单路径): {paths}'
     assert m2 in (0, 1), f'非法 m2 开关(0/1): {m2}'
 
