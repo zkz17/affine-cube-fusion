@@ -121,9 +121,11 @@ def unified_engine(entries, n, allow_d2, allow_m2, max_rounds=None):
                                     rc = fuse_closed(affA, aff[k], n)
                                     if not rc.ok or rc.cancel:
                                         continue
-                                    g = tA + pool[k][0].t_cost() - TC(n - rc.dim)
-                                    if g > 0 and (best is None or g > best[0]):
-                                        best = (g, 'm2',
+                                    # 真实总收益 = 对子移动 imm + A′+C 融合收益
+                                    # (不动点处 imm ≤ 0;修复:此前只计融合项,低估成本)
+                                    total = imm + tA + pool[k][0].t_cost() - TC(n - rc.dim)
+                                    if total > 0 and (best is None or total > best[0]):
+                                        best = (total, 'm2',
                                                 (idxA, idxB, k, rA, rB, rc, side))
 
         if best is None:
@@ -150,7 +152,7 @@ def unified_engine(entries, n, allow_d2, allow_m2, max_rounds=None):
             b1 = seg_from(rB, pool[idxB][1], n)
             fused = seg_from(rc, 0, n)
             pool = [e for q, e in enumerate(pool) if q not in (idxA, idxB, k)] + \
-                   [(b1, pool[idxB][1], idxB), (fused, 0, None)]
+                   [(b1, pool[idxB][1], pool[idxB][2]), (fused, 0, None)]
             cost -= gain
         stats[kind] += 1
         stats[f'{kind}_gain'] += gain
