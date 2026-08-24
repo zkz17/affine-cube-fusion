@@ -163,24 +163,39 @@ def g_of_cnots(fn, shift_c, cnots, n):
     return apply_linear(shift_fn(fn, shift_c, n) if shift_c else fn, A, n)
 
 
-def path_pools(fn, n, synth, tt):
+def run_case(fn, n, acc):
+    tt = TruthTable(fn, n)
+    synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+
+    # ---- 路径准备阶段(计入各自路径的总时间口径)----
+    t0 = time.perf_counter()
+    entries_a = synth._bdd_entries(tt, None)
+    acc['A_prep_wall'] += time.perf_counter() - t0
+
+    t0 = time.perf_counter()
+    entries_c = anf_pool(fn, n)
+    acc['C_prep_wall'] += time.perf_counter() - t0
+
+    t0 = time.perf_counter()
     _, cF = fprm_best(fn, n)
+    acc['F_prep_wall'] += time.perf_counter() - t0
+
+    t0 = time.perf_counter()
     _, _, cFp = fprm_proxy_best(fn, n)
+    acc['FP_prep_wall'] += time.perf_counter() - t0
+
+    t0 = time.perf_counter()
     kept_g, st_g, c_g, cnots_g = gl_search(fn, n)
+    acc['G_prep_wall'] += time.perf_counter() - t0
+
     g_pool = [(cb, r, key) for cb, r, key in kept_g] + [(cb, 0, None) for cb in st_g]
-    return {
-        'A': (synth._bdd_entries(tt, None), fn, 0),
-        'C': (anf_pool(fn, n), fn, 0),
+    pools = {
+        'A': (entries_a, fn, 0),
+        'C': (entries_c, fn, 0),
         'F': (anf_pool(shift_fn(fn, cF, n), n), shift_fn(fn, cF, n), cF),
         'FP': (anf_pool(shift_fn(fn, cFp, n), n), shift_fn(fn, cFp, n), cFp),
         'G': (g_pool, g_of_cnots(fn, c_g, cnots_g, n), None),
     }
-
-
-def run_case(fn, n, acc):
-    tt = TruthTable(fn, n)
-    synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
-    pools = path_pools(fn, n, synth, tt)
     for pname, (entries, expect, shift_c) in pools.items():
         t0 = time.perf_counter()
         v0 = pool_t_cost(*fuse_pool_global(entries, n))
@@ -218,6 +233,16 @@ def main():
                        f'{acc[f"{pname}_m2_gain"]},中性对 '
                        f'{acc[f"{pname}_m2_neutral"]})')
         msg.append(f'A/C/F/FP 发射级 compute_tt 验证: {acc["A_emit_ok"]}/{c} 通过')
+        for pname in ('A', 'C', 'F', 'FP', 'G'):
+            prep = acc[f'{pname}_prep_wall'] / c
+            v0 = acc[f'{pname}_V0_wall'] / c
+            v1 = acc[f'{pname}_V1_wall'] / c
+            msg.append(f'{pname:>3} 时间(ms/例): prep={prep*1e3:8.2f}  V0融合={v0*1e3:7.2f}  '
+                       f'V1融合+M2={v1*1e3:7.2f}  M2增量={max(v1-v0,0)*1e3:6.2f}')
+        fp_m2 = (acc['FP_prep_wall'] + acc['FP_V1_wall']) / c
+        f_orig = (acc['F_prep_wall'] + acc['F_V0_wall']) / c
+        msg.append(f'FP+M2 总时间(prep+V1)={fp_m2*1e3:.2f} ms/例  vs  原F(prep+V0)='
+                   f'{f_orig*1e3:.2f} ms/例  ({(fp_m2/f_orig-1):+.1%})')
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
     with open(OUT, 'w') as f:
