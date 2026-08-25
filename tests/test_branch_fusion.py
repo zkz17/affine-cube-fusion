@@ -3,9 +3,9 @@ from random import randint
 
 from utils.TruthTable import TruthTable
 from utils.Qubit import QubitManager
-from limbdd.CompleteBranch import (CompleteBranch, extract_complete_branches,
-                                   t_cost, is_affine_cube)
-from limbdd.fusion.BranchFusion import is_fusable, four_case_kind, fuse_pair, fuse_pool
+from backend.CompleteBranch import CompleteBranch, t_cost, is_affine_cube
+from limbdd.Extraction import extract_complete_branches
+from backend.fusion.BranchFusion import is_fusable, four_case_kind, fuse_pair, fuse_pool
 from experiments.phase0_branch_stats import is_affine_subspace
 from tests.test_complete_branch import prepare_pieces
 
@@ -15,15 +15,15 @@ def random_tt(num_vars):
 
 
 def emit_check(cb, num_vars):
-    """发射合成段并与 compute_tt 对账（同时校验输入复原）。"""
+    """Emit a synthetic segment and reconcile it with compute_tt (also checks input restoration)."""
     qm = QubitManager()
     for v in range(num_vars):
         qm.get_input_qubit(v)
-    assert cb.to_circuit(qm).compute_tt() == cb.fn(), f'发射不一致: {cb!r}'
+    assert cb.to_circuit(qm).compute_tt() == cb.fn(), f'emission mismatch: {cb!r}'
 
 
 def test_fusion_contract(num_vars=5, rounds=300, max_pairs=30, verbose=False):
-    """融合契约：判据等价（d-仿射 vs 四情形）、构造精确、控制数最优、规范形。"""
+    """Fusion contract: equivalent criteria (d-affine vs four cases), exact construction, optimal control count, canonical form."""
     print(f'Testing branch fusion contract with {rounds} random {num_vars}-input functions...')
 
     checked = 0
@@ -40,15 +40,15 @@ def test_fusion_contract(num_vars=5, rounds=300, max_pairs=30, verbose=False):
         for a, b in pairs:
             ca, cb = branches[a], branches[b]
             d = ca.fn() ^ cb.fn()
-            # 判据 1：d-仿射（与 Phase 0 的判定器交叉验证）
+            # Criterion 1: d-affine (cross-checked with the Phase 0 criterion)
             aff_cube = (d == 0) or is_affine_cube(d, num_vars)[0]
             aff_phase0 = (d == 0) or is_affine_subspace(d, num_vars)[0]
-            assert aff_cube == aff_phase0, f'仿射判定器不一致: tt={tt}, d={d}'
-            # 判据 2：权威 is_fusable 与四情形分类等价
+            assert aff_cube == aff_phase0, f'affine criterion mismatch: tt={tt}, d={d}'
+            # Criterion 2: authoritative is_fusable is equivalent to the four-case classification
             fus = is_fusable(ca, cb)
             kind = four_case_kind(ca, cb)
-            assert fus == aff_cube, f'is_fusable 与 d-仿射不一致: tt={tt}'
-            assert fus == (kind is not None), f'四情形分类与 d-仿射不一致: tt={tt}, kind={kind}'
+            assert fus == aff_cube, f'is_fusable disagrees with d-affine: tt={tt}'
+            assert fus == (kind is not None), f'four-case classification disagrees with d-affine: tt={tt}, kind={kind}'
 
             if not fus:
                 fused, cancelled = fuse_pair(ca, cb)
@@ -56,20 +56,20 @@ def test_fusion_contract(num_vars=5, rounds=300, max_pairs=30, verbose=False):
                 continue
 
             fused, cancelled = fuse_pair(ca, cb)
-            assert cancelled == (d == 0), f'抵消语义不一致: d=={d == 0}, cancelled={cancelled}'
+            assert cancelled == (d == 0), f'cancellation semantics mismatch: d=={d == 0}, cancelled={cancelled}'
             if cancelled:
                 checked += 1
                 continue
 
-            # 构造契约：f_fused == f_A ⊕ f_B，且发射电路 compute_tt 全等
-            assert fused.fn() == d, f'融合段函数 != f_A⊕f_B: tt={tt}'
+            # Construction contract: f_fused == f_A ⊕ f_B, and the emitted circuit agrees exactly via compute_tt
+            assert fused.fn() == d, f'fused segment function != f_A⊕f_B: tt={tt}'
             emit_check(fused, num_vars)
-            # 控制数最优：n − dim(d)
+            # Optimal control count: n − dim(d)
             _, k = is_affine_cube(d, num_vars)
             assert fused.nctrl() == num_vars - k, \
-                f'控制数未达最优: nctrl={fused.nctrl()}, n-k={num_vars - k}'
+                f'control count not optimal: nctrl={fused.nctrl()}, n-k={num_vars - k}'
             assert fused.t_cost() == t_cost(num_vars - k)
-            # 规范形：x_trans=0、cnot_ops/controls 升序
+            # Canonical form: x_trans=0, cnot_ops/controls ascending
             plan = fused.synthetic
             assert plan.x_trans == 0
             assert plan.cnot_ops == tuple(sorted(plan.cnot_ops))
@@ -83,7 +83,7 @@ def test_fusion_contract(num_vars=5, rounds=300, max_pairs=30, verbose=False):
 
 
 def test_fuse_pool(num_vars=5, rounds=300, verbose=False):
-    """池融合：XOR 不变量、段数单调减、T 不升、确定性、产物全部有效。"""
+    """Pool fusion: XOR invariant, monotone decrease in segment count, T not increased, determinism, all products valid."""
     print(f'Testing fusion pool invariants with {rounds} random {num_vars}-input functions...')
 
     for i in range(rounds):
@@ -106,19 +106,19 @@ def test_fuse_pool(num_vars=5, rounds=300, verbose=False):
             t_after += cb.t_cost()
             emit_check(cb, num_vars)
 
-        assert xor_after == xor_before, f'池 XOR 不变量破坏: tt={tt}'
-        assert len(fused) <= len(branches), f'段数未单调减: {len(branches)} -> {len(fused)}'
-        assert t_after <= t_before, f'T 未单调降: {t_before} -> {t_after}'
-        # 确定性
-        assert fuse_pool(branches) == fused, f'fuse_pool 非确定性: tt={tt}'
+        assert xor_after == xor_before, f'pool XOR invariant broken: tt={tt}'
+        assert len(fused) <= len(branches), f'segment count did not decrease monotonically: {len(branches)} -> {len(fused)}'
+        assert t_after <= t_before, f'T did not decrease monotonically: {t_before} -> {t_after}'
+        # Determinism
+        assert fuse_pool(branches) == fused, f'fuse_pool is nondeterministic: tt={tt}'
         if verbose:
-            print('  ', i, str(tt), f'{len(branches)} -> {len(fused)} 段, T {t_before} -> {t_after}')
+            print('  ', i, str(tt), f'{len(branches)} -> {len(fused)} segments, T {t_before} -> {t_after}')
 
     print('Fusion pool invariant test passed!!!')
 
 
 def test_four_case_construction(num_vars=5, rounds=300, verbose=False):
-    """四情形逐一构造：维数/控制数符合定理 2，且真实数据能覆盖到全部情形（如出现则验证）。"""
+    """Construct each of the four cases: dimensions/control counts obey Theorem 2, and real data covers all cases (verified when they occur)."""
     print(f'Testing four-case fusion construction with {rounds} random {num_vars}-input functions...')
 
     kind_hits = Counter()
@@ -142,14 +142,14 @@ def test_four_case_construction(num_vars=5, rounds=300, verbose=False):
                     continue
                 _, k = is_affine_cube(d, num_vars)
                 assert fused.nctrl() == num_vars - k
-                # 维数按定理 2 核对
+                # Check dimensions against Theorem 2
                 if kind == 1:
-                    assert k == len(ca.direction_key()) + 1, f'情形 1 维数错: k={k}'
+                    assert k == len(ca.direction_key()) + 1, f'case 1 dimension wrong: k={k}'
                 elif kind == 2:
-                    assert k == len(ca.direction_key()), f'情形 2 维数错: k={k}'
+                    assert k == len(ca.direction_key()), f'case 2 dimension wrong: k={k}'
                 else:
                     smaller = min(len(ca.direction_key()), len(cb.direction_key()))
-                    assert k == smaller, f'情形 {kind} 维数错: k={k}, smaller={smaller}'
+                    assert k == smaller, f'case {kind} dimension wrong: k={k}, smaller={smaller}'
                 emit_check(fused, num_vars)
                 constructed[kind] += 1
                 if verbose:
@@ -157,13 +157,13 @@ def test_four_case_construction(num_vars=5, rounds=300, verbose=False):
                           [len(branches[a].direction_key()), len(branches[b].direction_key())],
                           '->', k)
 
-    print(f'Four-case construction test passed!!! (命中 {dict(kind_hits)}, 构造 {dict(constructed)})')
+    print(f'Four-case construction test passed!!! (hits {dict(kind_hits)}, constructed {dict(constructed)})')
 
-    # 情形 3/4 的确定性构造（随机数据罕见）：超平面陪集段 与 常数 1 段 互补
+    # Deterministic construction for cases 3/4 (rare in random data): a hyperplane coset segment and the constant-1 segment are complementary
     const1 = CompleteBranch(4)
-    single = CompleteBranch(4, mask=1 << 1, bitstr=0)          # [x1=0]，K=span{x0,x2,x3}
-    assert four_case_kind(single, const1) == 3, f'期望情形 3（K_A ⊂ K_B），got {four_case_kind(single, const1)}'
-    assert four_case_kind(const1, single) == 4, f'期望情形 4（K_B ⊂ K_A），got {four_case_kind(const1, single)}'
+    single = CompleteBranch(4, mask=1 << 1, bitstr=0)          # [x1=0], K=span{x0,x2,x3}
+    assert four_case_kind(single, const1) == 3, f'expected case 3 (K_A ⊂ K_B), got {four_case_kind(single, const1)}'
+    assert four_case_kind(const1, single) == 4, f'expected case 4 (K_B ⊂ K_A), got {four_case_kind(const1, single)}'
     fused, cancelled = fuse_pair(single, const1)
     assert not cancelled and fused.nctrl() == 1 and fused.fn() == (single.fn() ^ const1.fn())
     emit_check(fused, 4)
@@ -171,13 +171,14 @@ def test_four_case_construction(num_vars=5, rounds=300, verbose=False):
 
 def test_pivot_oracle_alignment(num_vars=5, rounds=30, max_pairs=2, verbose=False):
     """
-    pivot oracle 契约对齐（限同图完整分支对）：对 d 仿射的对执行 pivot_to +
-    嵌套综合，契约 f_pivot∘map == f_A⊕f_B 成立时必须与我们的融合段函数一致；
-    失败计入跳过（pivot_to 对含 one-child 位置的对不健全，属已知缺陷）。
+    Pivot oracle contract alignment (only for complete branch pairs in the same graph): for pairs
+    with d affine, run pivot_to + nested synthesis; when the contract f_pivot∘map == f_A⊕f_B holds,
+    it must agree with our fused segment function; failures count as skips (pivot_to is unsound for
+    pairs containing one-child positions, a known defect).
     """
     from circuit.MCXCircuit import MCXCircuit
     from limbdd.LimBDDManager import LimBDDManager
-    from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+    from backend.OracleSynthesizer import OracleSynthesizer
 
     print(f'Testing pivot oracle alignment with {rounds} random {num_vars}-input functions...')
 
@@ -203,7 +204,7 @@ def test_pivot_oracle_alignment(num_vars=5, rounds=30, max_pairs=2, verbose=Fals
                 try:
                     pivot_limbdd, x_map, cx_map = LimBDDManager.pivot_to(
                         g.root.node, ca.source_branch, cb.source_branch, g)
-                    nested = LimBDDOracleSynthesizer(ancilla_num=0, fused_backend=False)
+                    nested = OracleSynthesizer(ancilla_num=0, fused_backend=False)
                     qm = QubitManager()
                     for v in range(num_vars):
                         qm.get_input_qubit(v)
@@ -230,11 +231,11 @@ def test_pivot_oracle_alignment(num_vars=5, rounds=30, max_pairs=2, verbose=Fals
                             break
                     if ok:
                         ok_cnt += 1
-                        # 与我们的融合段一致
+                        # Must agree with our fused segment
                         fused, cancelled = fuse_pair(ca, cb)
                         assert not cancelled and fused.fn() == d
                     else:
-                        skip_cnt += 1  # pivot_to 已知缺陷（one-child 位置）
+                        skip_cnt += 1  # known pivot_to defect (one-child positions)
                 except Exception:
                     skip_cnt += 1
                 if verbose:

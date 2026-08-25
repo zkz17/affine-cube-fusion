@@ -3,18 +3,19 @@ from utils.TruthTable import TruthTable
 from limbdd.Node import LimBDDNode, LimBDDSignal
 from limbdd.LimBDD import LimBDD, SimpleBranch
 from limbdd.LimBDDManager import LimBDDManager
-from limbdd.fusion.FusedBackend import limbdd2circ_fused
-from limbdd.CompleteBranch import abs_lim, extract_complete_branches, _bits
-from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, shift_fn
-from limbdd.fusion.GLSearch import gl_search
-from limbdd.fusion.FprmProxy import fprm_proxy_best
-from limbdd.fusion.MacroM2 import m2_interleaved
+from limbdd.FusedBackend import limbdd2circ_fused
+from backend.CompleteBranch import _bits
+from limbdd.Extraction import abs_lim, extract_complete_branches
+from backend.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool, shift_fn
+from backend.fusion.GLSearch import gl_search
+from backend.fusion.FprmProxy import fprm_proxy_best
+from backend.fusion.MacroM2 import m2_interleaved
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 from utils.to_qiskit import to_qiskit
 from config import config
 
-class LimBDDOracleSynthesizer:
+class OracleSynthesizer:
     def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False,
                  fprm_proxy=False, paths=('F',), m2_post=True):
         self.limbdd = None
@@ -24,33 +25,38 @@ class LimBDDOracleSynthesizer:
         self.nidx2circ = {}             # { LimBDDNode.idx : [ MCXCircuit, int ] }
         self.reorder = reorder
         self.ancilla_num = ancilla_num
-        # Phase 5 起：融合发射后端为 no-ancilla 路径的默认后端（ancilla_num>0 时静默忽略）
+        # Since Phase 5 the fused emission backend is the default backend of the no-ancilla path
+        # (silently ignored when ancilla_num>0)
         self.fused_backend = fused_backend
-        # G-2.2 可选开关（默认关闭）：确定性 GL(n,2) 局部搜索,时间换质量
-        # (n=7 约 +6s/例,94% 是融合引擎本身——见 Optimization_roadmap.md G-2.2 节)。
-        # 探索期纪律:G 为**独立选项**(不隐式携带 A);paths 组合的 min 只发生在
-        # 显式选中的路径之间,无任何隐藏的多路径求 min。
+        # G-2.2 optional switch (off by default): deterministic GL(n,2) local search, time for quality
+        # (about +6s/case at n=7, 94% of which is the fusion engine itself -- see docs/architecture.md G-2.2).
+        # Exploration-phase discipline: G is an **independent option** (it does not implicitly carry A);
+        # a min over path combinations only happens among the explicitly selected paths, never hidden.
         self.gl_search = gl_search
-        # 方案 A 可选开关（默认关闭）：FPRM 免融合代理预筛 **取代** F 路径
-        # (选择关系而非 min;n≥9 意图升级现行平移 climb2,n≤8 质量低 12~28%)
+        # Plan A optional switch (off by default): the fusion-free proxy prescreen **replaces** the F path
+        # (a choice relation, not a min; intended to upgrade the current shift climb2 for n≥9, 12~28%
+        # worse quality for n≤8)
         self.fprm_proxy = fprm_proxy
-        # 路径选择(2025-08-22,探索期纪律):**单路径专用**——paths 为单字符
-        # 'A'/'C'/'F'(或仅含其一的元组);多路径组合(显式 min)在本阶段禁用,不测。
-        # 实际测试路径 = A / C / F / FP(代理开关)/ G(gl 开关)。
-        # gl_search=True 时单独运行 G 选项,忽略 paths。
+        # Path selection (2025-08-22, exploration-phase discipline): **single-path only** -- paths is a
+        # single character 'A'/'C'/'F' (or a 1-tuple thereof); multi-path combinations (explicit min) are
+        # disabled and untested at this stage.
+        # Actual test paths = A / C / F / FP (proxy switch) / G (gl switch).
+        # With gl_search=True the G option runs alone, ignoring paths.
         if isinstance(paths, (tuple, list)):
-            assert len(paths) == 1 and paths[0] in ('A', 'C', 'F'),                 f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
+            assert len(paths) == 1 and paths[0] in ('A', 'C', 'F'),                 f'illegal paths (only single-path A/C/F allowed at this stage): {paths}'
             self.paths = tuple(paths)
         else:
-            assert paths in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
+            assert paths in ('A', 'C', 'F'), f'illegal paths (only single-path A/C/F allowed at this stage): {paths}'
             self.paths = (paths,)
-        # 宏 M2 相间后处理开关(2025-08-22,P9 后接入;2025-08-22 定稿**默认开启**):
-        # 获胜池融合不动点上做 {A,B,C}→{B⊕h,(A⊕h)⊕C} 严格下降宏
-        # (docs/macro_m2_theory.md),T 端逐例零回归、n≤7 全量测例 CX 劣化 0 例,
-        # 时间 0~2.3ms/例(相对 F 的 2^n 平移全枚举/FP 的代理预筛可忽略)。
-        # 注:开启后 G≤F 零回归链降级为经验性(G 池上 M2 机会通常为 0,F 上
-        # 偶发 —G 是慢速强化选项而非生产默认,该链不作为约束;结构性对照见
-        # tests/test_gl_search.py 显式 m2_post=False 口径)。
+        # Macro M2 interleaved post-processing switch (2025-08-22, integrated after P9; **default on**
+        # as of 2025-08-22): at the winning pool's fusion fixed point apply the strictly-decreasing macro
+        # {A,B,C}→{B⊕h,(A⊕h)⊕C} (docs/macro_m2_theory.md); per-case T never regresses, zero CX-worse
+        # cases over the full n≤7 measurements, 0~2.3ms/case (negligible against F's 2^n shift full
+        # enumeration / FP's proxy prescreen).
+        # Note: with it on, the G≤F zero-regression chain becomes empirical (M2 opportunities on G pools
+        # are usually 0 and occasionally present on F -- G is a slow enhancement option rather than the
+        # production default, so that chain is not a constraint; the structural comparison is kept in
+        # tests/test_gl_search.py's explicit m2_post=False setting).
         self.m2_post = m2_post
 
     def clear(self):
@@ -71,11 +77,12 @@ class LimBDDOracleSynthesizer:
 
         self.clear()
         if self.fused_backend and self.ancilla_num == 0:
-            # 融合后端跳过 construct(不建 BDD),须显式分配全部输入量子位:
-            # 否则首段不触碰某输入时该 qubit 惰性缺失,compute_tt 会在缩小的
-            # 变量空间上枚举(回归例:n=4 tt=64560,cF=0 且首段只用 qubit 1/2/3)。
+            # The fused backend skips construct (no BDD build) and must explicitly allocate all input
+            # qubits: otherwise a qubit whose input no leading segment touches is lazily missing and
+            # compute_tt enumerates over a shrunken variable space (regression case: n=4 tt=64560,
+            # cF=0 and the first segment only uses qubits 1/2/3).
             self.allocate_input_qubit(tt.num_var)
-            self.process_fused_global(tt, path)   # Phase 5+：min(BDD, ANF) 全局融合后端
+            self.process_fused_global(tt, path)   # Phase 5+: global fusion backend
             return
 
         self.construct(tt)
@@ -108,9 +115,10 @@ class LimBDDOracleSynthesizer:
 
     def _collect_pieces_fused(self, path=None):
         """
-        Phase 5 融合路径的图阶段（与旧 process() 的图阶段逐行同构）：
-        try_neg / split_neg / reorder / 分片与吸收时序，返回处理顺序的非零子图列表。
-        不生成电路；供 process_fused_global 与残差测量脚本复用。
+        Graph phase of the Phase-5 fusion path (line-for-line isomorphic to the old process()'s graph
+        phase): try_neg / split_neg / reorder / slice-and-absorb timing, returning the non-zero
+        subgraphs in processing order. No circuits are generated; shared by process_fused_global and
+        the residual-measurement scripts.
         """
         mgr = self.limbdd_mgr
         mgr.try_neg(mgr.limbdd)
@@ -120,7 +128,7 @@ class LimBDDOracleSynthesizer:
             self.variable_reorder()
             if path: self.show(mgr.limbdd, path + '_reorder')
 
-        pieces = []  # 处理顺序（吸收/拆分后仍非零的子图）
+        pieces = []  # processing order (subgraphs still non-zero after absorption/splitting)
         for limbdd_list in mgr.limbdd_list.values():
             for limbdd in limbdd_list:
                 if limbdd.root.weight:
@@ -148,8 +156,8 @@ class LimBDDOracleSynthesizer:
         return pieces
 
     def _bdd_entries(self, tt, path):
-        """一次完整的 BDD 分解（construct + 图阶段 + sifting），返回全局条目列表。
-        construct 会重建 limbdd_mgr，可安全连续调用多次。"""
+        """One complete BDD decomposition (construct + graph phase + sifting), returning the global
+        entry list. construct rebuilds limbdd_mgr, so repeated consecutive calls are safe."""
         self.construct(tt)
         pieces = self._collect_pieces_fused(path)
         n = tt.num_var
@@ -162,42 +170,46 @@ class LimBDDOracleSynthesizer:
 
     def process_fused_global(self, tt, path=None):
         """
-        Phase 5+：全局融合后端（默认 no-ancilla 路径）。
+        Phase 5+: global fusion backend (default no-ancilla path).
 
-        路径选择(探索期纪律,2025-08-22):生产后端**暂时只跑 F 路径**(paths 默认
-        ('F',));paths 为 {'A','C','F'} 的任意子集,仅计算所选路径并取其中最优。
-          A. BDD 路径：图阶段（try_neg / split_neg / reorder / 拆分,absorb 已移除）
-             → 分支池 → 全局融合；
-          C. ANF 路径：真值表 → Möbius → 单项式池（c=0）；
-          F. FPRM 路径（G-2.1）：平移子群上搜索最优 c（n≤8 全枚举 2^n；
-             n≥9 climb2 双起点,确定性）；电路 = X(c) 三明治（T 免费）。
-        fprm_proxy=True 时 F 由免融合代理预筛版取代（选择关系,非 min）。
-        并列优先级按 paths 中的给定顺序(默认 F 唯一,无并列问题)。
+        Path selection (exploration-phase discipline, 2025-08-22): the production backend runs only the
+        F path for now (paths defaults to ('F',)); paths may be any subset of {'A','C','F'}, computing
+        only the selected paths and taking the best of them.
+          A. BDD path: graph phase (try_neg / split_neg / reorder / splitting, absorb removed)
+             → branch pool → global fusion;
+          C. ANF path: truth table → Möbius → monomial pool (c=0);
+          F. FPRM path (G-2.1): search for the optimal c over the shift subgroup (n≤8 full 2^n
+             enumeration; n≥9 deterministic two-start climb2); circuit = X(c) sandwich (T-free).
+        With fprm_proxy=True, F is replaced by the fusion-free proxy prescreen version (choice relation,
+        not min). Ties are prioritized by the given order in paths (default F only, no tie issue).
 
-        可选（gl_search=True，G-2.2）：忽略 paths,单独运行 **G 选项**——
-        确定性 GL(n,2) 局部搜索（候选含 FPRM 最优 cF ⇒ G ≤ F,相对 F 零回归;
-        T 并列优先零 wrapper）。探索期纪律:G 为独立选项,不再隐式 min(A,G)。
-        代价:n=7 约 +6s/例。
+        Optional (gl_search=True, G-2.2): ignore paths and run the **G option** alone -- deterministic
+        GL(n,2) local search (candidates include the FPRM-optimal cF, so G ≤ F, zero regression
+        relative to F; zero wrapper preferred on T ties). Exploration-phase discipline: G is an
+        independent option, no implicit min(A,G). Cost: about +6s/case at n=7.
 
-        注（2025-08-21）：C′ 路径（ANF 差一变量预合并,1.2/T-3）经实测后**暂时关闭**
-        （端到端收益 −0.22%~−0.53% ΣT、代价 +23%~36% wall,处于决策临界区）;
-        `BranchFusion.anf_pool_premerged` 与 `tests/test_premerge.py` 保留,随时可重新接入。
+        Note (2025-08-21): the C' path (ANF one-variable-apart pre-merge, 1.2/T-3) was measured and
+        **turned off for now** (end-to-end gain −0.22%~−0.53% ΣT, cost +23%~36% wall, sitting in the
+        decision-critical zone); `BranchFusion.anf_pool_premerged` and `tests/test_premerge.py` are
+        kept and can be re-enabled at any time.
 
-        可选（m2_post=True，宏 M2 相间后处理,**默认开启**):获胜池融合不动点上
-        追加严格下降宏 {A,B,C}→{B⊕h,(A⊕h)⊕C}(docs/macro_m2_theory.md;T 端
-        逐例零回归、n≤7 全量测例 CX 劣化 0 例,时间 0~2.3ms/例;m2_post=False
-        可完全回到旧口径,用于结构性对照)。
+        Optional (m2_post=True, macro M2 interleaved post-processing, **default on**): on the winning
+        pool's fusion fixed point apply the strictly-decreasing macro {A,B,C}→{B⊕h,(A⊕h)⊕C}
+        (docs/macro_m2_theory.md; per-case T never regresses, zero CX-worse cases over the full n≤7
+        measurements, 0~2.3ms/case; m2_post=False returns completely to the old convention, for
+        structural comparisons).
 
-        发射：按根掩码分组（每个 r 一个三明治 X(r) … X(r)），融合段（r=0）独立
-        发射；F/FP 获胜时整体包 X(c) 三明治;G 获胜时包 CNOT(A⁻¹)/CNOT(A) 线性
-        三明治;末尾 simplify_terms。
+        Emission: grouped by root mask (one X(r) … X(r) sandwich per r), fused segments (r=0) emitted
+        independently; an overall X(c) sandwich when F/FP wins; CNOT(A⁻¹)/CNOT(A) linear sandwich when
+        G wins; simplify_terms at the end.
         """
         n = tt.num_var
 
         if self.gl_search:
-            # ---- 选项 G:确定性 GL(n,2) 局部搜索(独立选项,无隐式 min)----
-            # 探索期纪律:任何「多路径取 min」都必须是显式选项;G 单独成项,
-            # 不再隐式携带 A。(G 内部候选含 cF ⇒ G ≤ F,零回归相对 F 保持。)
+            # ---- option G: deterministic GL(n,2) local search (independent option, no implicit min) ----
+            # Exploration-phase discipline: any "multi-path min" must be an explicit option; G is a
+            # standalone item and no longer implicitly carries A. (G's internal candidates include cF,
+            # so G ≤ F, zero regression relative to F is preserved.)
             kept, standalone, shift_c, cnots = gl_search(tt.bitstr, n)
             if self.m2_post:
                 kept, standalone = m2_interleaved(kept, standalone, n)
@@ -215,7 +227,7 @@ class LimBDDOracleSynthesizer:
                     kept_c, standalone_c = m2_interleaved(kept_c, standalone_c, n)
                 candidates.append((pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0, ()))
             if 'F' in self.paths:
-                # 方案 A(fprm_proxy=True)时用代理预筛版**取代**默认 F(选择关系,非 min)
+                # With Plan A (fprm_proxy=True) the proxy prescreen version **replaces** the default F (choice relation, not min)
                 if self.fprm_proxy:
                     kept_f, standalone_f, shift_c = fprm_proxy_best(tt.bitstr, n)
                 else:
@@ -223,15 +235,15 @@ class LimBDDOracleSynthesizer:
                 if self.m2_post:
                     kept_f, standalone_f = m2_interleaved(kept_f, standalone_f, n)
                 candidates.append((pool_t_cost(kept_f, standalone_f), kept_f, standalone_f, shift_c, ()))
-            assert candidates, 'paths 为空(构造时已校验,不应到达)'
+            assert candidates, 'paths is empty (already validated at construction; should be unreachable)'
             best_cost = min(c[0] for c in candidates)
             _, kept, standalone, shift_c, cnots = next(c for c in candidates if c[0] == best_cost)
 
-        # ---- 发射：平移三明治 X(c)(shift_c=0 时 no-op)----
+        # ---- emission: shift sandwich X(c) (no-op when shift_c=0) ----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
         self.circ.add_lim_operator(shift_qubits)
 
-        # ---- GL 获胜时的线性三明治:CNOT(A⁻¹) = cnots 正序(A = E1∘…∘Ek)----
+        # ---- linear sandwich when GL wins: CNOT(A⁻¹) = cnots in forward order (A = E1∘…∘Ek) ----
         for c_ctrl, t_tgt in cnots:
             self.circ.add_lim_operator([self.qubit_mgr.get_input_qubit(t_tgt)],
                                        Control(self.qubit_mgr.get_input_qubit(c_ctrl), 1))
@@ -242,8 +254,8 @@ class LimBDDOracleSynthesizer:
         for r, segs in sorted(kept_by_r.items()):
             r_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(r)]
             self.circ.add_lim_operator(r_qubits)
-            # B-4:段顺序只影响 CX(段集合不变 ⇒ T 不变);
-            # 评估走真实 merge 管线(qubit_map 重映射),前缀为当前未化简电路。
+            # B-4: segment order only affects CX (the segment set is unchanged, so T is unchanged);
+            # evaluate through the real merge pipeline (qubit_map remapping), prefix = current unsimplified circuit.
             for seg_circ in order_segments_greedy([cb.to_circuit(self.qubit_mgr) for cb in segs],
                                                   self.circ if not self.circ.empty() else None):
                 self.circ.merge(seg_circ)
@@ -252,7 +264,7 @@ class LimBDDOracleSynthesizer:
                                               self.circ if not self.circ.empty() else None):
             self.circ.merge(seg_circ)
 
-        # ---- GL 获胜时的线性三明治:CNOT(A) = cnots 逆序 ----
+        # ---- linear sandwich when GL wins: CNOT(A) = cnots in reverse order ----
         for c_ctrl, t_tgt in reversed(cnots):
             self.circ.add_lim_operator([self.qubit_mgr.get_input_qubit(t_tgt)],
                                        Control(self.qubit_mgr.get_input_qubit(c_ctrl), 1))
@@ -262,15 +274,15 @@ class LimBDDOracleSynthesizer:
 
     def _fprm_entries(self, tt, n):
         """
-        G-2.1：平移子群上搜索最优 ANF 池。
+        G-2.1: search for the optimal ANF pool over the shift subgroup.
 
-        返回 (kept, standalone, best_c)。预算策略（阶段 3.1-C 决策）：
-          n ≤ 8：全枚举 2^n（廉价，1.9s/例 以下）；
-          n ≥ 9：climb2 —— 从 c=0 与 c=2^n−1 双起点做最陡上升（Hamming 邻域、
-                 严格改进、缓存复用，确定性），实测兑现全枚举收益的 85%~100%，
-                 优于原 rand64 采样（72%~81%）。
-        已记录未实现的可选项（见 docs/Optimization_roadmap.md）：
-          ① rand64 采样点作多起点爬山的混合方案；② evaluate.py 的全枚举离线开关。
+        Returns (kept, standalone, best_c). Budget policy (stage 3.1-C decision):
+          n ≤ 8: full 2^n enumeration (cheap, under 1.9s/case);
+          n ≥ 9: climb2 -- steepest ascent from the two starts c=0 and c=2^n−1 (Hamming neighborhood,
+                 strict improvement, cache reuse, deterministic); measured to realize 85%~100% of the
+                 full-enumeration gain, better than the old rand64 sampling (72%~81%).
+        Recorded but unimplemented options (see docs/architecture.md):
+          ① a hybrid of rand64 sample points as multi-start climbing; ② an evaluate.py full-enumeration offline switch.
         """
         full = 1 << n
         cache = {}
@@ -317,7 +329,7 @@ class LimBDDOracleSynthesizer:
         if not limbdd.root.weight: return MCXCircuit()
 
         if self.fused_backend and anc_num == 0:
-            # Phase 4：CompleteBranch 融合发射后端（抽取 → 融合池 → 逐段发射 + 根三明治）
+            # Phase 4: CompleteBranch fused emission backend (extract → fusion pool → per-segment emission + root sandwich)
             n = self.qubit_mgr.get_input_num()
             return limbdd2circ_fused(limbdd, self.qubit_mgr, n)
 
@@ -396,7 +408,7 @@ class LimBDDOracleSynthesizer:
         return cut_map
 
     def get_pivot_to_circ(self, pivot_limbdd, x_map, cx_map, add_before):
-        nested_synthesizer = LimBDDOracleSynthesizer(ancilla_num=0, fused_backend=False)
+        nested_synthesizer = OracleSynthesizer(ancilla_num=0, fused_backend=False)
         nested_synthesizer.qubit_mgr = self.qubit_mgr
         nested_synthesizer.circ = MCXCircuit(self.qubit_mgr)
         nested_synthesizer.limbdd_mgr.limbdd = pivot_limbdd

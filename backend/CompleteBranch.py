@@ -1,36 +1,37 @@
 # -*- coding: utf-8 -*-
 """
-CompleteBranch：一个分支的完全信息（压缩表示）。
+CompleteBranch: the complete information of one branch (compressed representation).
 
-设计见 CompleteBranch_fusion_plan.md §7.8（2025-08 修订版）。
+Design: docs/architecture.md (2025-08 revision).
 
-主数据（不可变；绝对变量位空间，bit k = 变量 k）：
-  mask      : int   走边位置（MCX 控制变量）掩码；0 位 = fallthrough
-  bitstr    : int   走边极性（仅 mask 位上有效；mask=0 处恒 0）
-  x_global  : int   全部无条件 X 的净掩码（走边 Lim 的 XOR + 各 ft 位置 lim0∩lim1 上提部分）
-  ft_lims   : tuple[(ctrl, m0, m1), ...]  自顶向下；m0&m1==0；m0/m1 的目标均位于 ctrl 下方
-  synthetic : SyntheticPlan|None          融合产物（Phase 3）；None = 走线型分支
+Primary data (immutable; absolute variable bit space, bit k = variable k):
+  mask      : int   walk-edge positions (MCX control variables) mask; 0 bits = fallthrough
+  bitstr    : int   walk-edge polarities (valid only on mask bits; always 0 where mask is 0)
+  x_global  : int   net mask of all unconditional X's (XOR of walk-edge Lims + the lifted
+                    lim0∩lim1 part of each ft position)
+  ft_lims   : tuple[(ctrl, m0, m1), ...]  top-down; m0&m1==0; targets of m0/m1 both lie below ctrl
+  synthetic : SyntheticPlan|None          fusion product (Phase 3); None = walk-type branch
 
-派生（惰性缓存）：
-  AffineInfo(base, basis)：支撑集 S = base + span(basis)，basis 为 K 的规范基（RREF）
-  fn                      ：2^n 位真值表
+Derived (lazily cached):
+  AffineInfo(base, basis): support S = base + span(basis), basis the canonical basis of K (RREF)
+  fn                      : the 2^n-bit truth table
 
-正确性依据（无近似）：
-  1. 任何一层出边 Lim 只作用于"下方"变量 → 走边 Lim 可整体 XOR 进 x_global；
-  2. [c=0→m0]⊕[c=1→m1] = (m0∩m1) ⊕ [c=0→m0∖m1] ⊕ [c=1→m1∖m0] → 公共部分上提 x_global；
-  3. ft 项条件只依赖更高层变量 → 按 ft_lims 自顶向下发射即精确复现语义。
+Correctness basis (no approximation):
+  1. any level's outgoing Lim only acts on "lower" variables, so the walk-edge Lim can be XORed
+     into x_global as a whole;
+  2. [c=0→m0]⊕[c=1→m1] = (m0∩m1) ⊕ [c=0→m0∖m1] ⊕ [c=1→m1∖m0], so the common part is lifted into x_global;
+  3. an ft term's condition only depends on higher-level variables, so emitting ft_lims top-down
+     reproduces the semantics exactly.
 """
 from collections import namedtuple
 
 from config import config
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit
-from limbdd.LimBDD import LimBDD, SimpleBranch
-from limbdd.Node import LimBDDNode, LimBDDSignal
 
 
 def t_cost(k):
-    """k 控 MCX 的 T 代价（单一事实源：config.py 的 't_cost'，近线性新模型）。"""
+    """T cost of a k-controlled MCX (single source of truth: config.py's 't_cost', near-linear new model)."""
     return config['t_cost'](k)
 
 
@@ -38,7 +39,7 @@ AffineInfo = namedtuple('AffineInfo', 'base basis')
 
 
 def _bits(mask):
-    """返回 mask 中置位比特的升序列表。"""
+    """Ascending list of the set bits in mask."""
     out = []
     while mask:
         low = mask & (-mask)
@@ -46,25 +47,11 @@ def _bits(mask):
         mask ^= low
     return out
 
-
-def abs_lim(lim, var_order, anomalies=None):
-    """把图内 Lim（层位空间）换算为绝对变量位空间：bit k = 变量 k。"""
-    m = 0
-    for j in range(lim.bitnum):
-        if (lim.bitstr >> j) & 1:
-            if j >= len(var_order):
-                if anomalies is not None:
-                    anomalies['lim_overflow'] += 1
-                continue
-            m |= 1 << var_order[j]
-    return m
-
-
 def rref(rows, n):
     """
-    把约束行 (mask, const) 化为 RREF（主元 = 最低置位，完全消元）。
-    返回 [(mask, const, pivot_col), ...]（按主元列升序；行值为**最终** RREF 形，
-    数学依据见 CompleteBranch_algebra.md §1.2/§3.6）。
+    Reduce constraint rows (mask, const) to RREF (pivot = lowest set bit, full elimination).
+    Returns [(mask, const, pivot_col), ...] (pivot columns ascending; row values are the **final**
+    RREF form; math basis in CompleteBranch_algebra.md §1.2/§3.6).
     """
     row_masks = [m for m, _ in rows]
     row_consts = [c for _, c in rows]
@@ -87,14 +74,14 @@ def rref(rows, n):
                 row_consts[i] ^= row_consts[r]
         pivot_cols.append(col)
         r += 1
-    # 注意：必须先完成全部消元再取行值（后续主元会继续清除先前行的该列）
+    # Note: all elimination must finish before reading row values (later pivots keep clearing this column in earlier rows)
     return [(row_masks[i], row_consts[i], pivot_cols[i]) for i in range(r)]
 
 
 def is_affine_cube(fn, n):
     """
-    fn（2^n 位真值表）的支撑是否为仿射子空间。
-    返回 (True, dim) 或 (False, 0)；空支撑（fn==0）返回 (True, -1)。
+    Whether fn's (2^n-bit truth table) support is an affine subspace.
+    Returns (True, dim) or (False, 0); empty support (fn==0) returns (True, -1).
     """
     bits = [i for i in range(1 << n) if (fn >> i) & 1]
     if not bits:
@@ -113,7 +100,7 @@ def is_affine_cube(fn, n):
 
 
 def reduce_basis(vectors):
-    """把向量组归约为规范基：各向量最低置位互异，按主元（最低位）升序返回。"""
+    """Reduce a vector set to a canonical basis: distinct lowest set bits, returned in ascending pivot (lowest bit) order."""
     by_bit = {}
     for v in vectors:
         x = v
@@ -128,7 +115,7 @@ def reduce_basis(vectors):
 
 
 def in_span(x, basis):
-    """x 是否在 span(basis) 中（basis 需为 reduce_basis 产出的规范基：主元升序）。"""
+    """Whether x is in span(basis) (basis must be the canonical reduce_basis output: pivots ascending)."""
     for b in basis:
         if x & (b & (-b)):
             x ^= b
@@ -136,7 +123,7 @@ def in_span(x, basis):
 
 
 def affine_from_fn(fn, n):
-    """fn 支撑的 (base, basis)：base = 最低支撑点，basis = reduce_basis 规范基。"""
+    """(base, basis) of fn's support: base = lowest support point, basis = reduce_basis canonical basis."""
     bits = [i for i in range(1 << n) if (fn >> i) & 1]
     if not bits:
         return AffineInfo(0, ())
@@ -145,7 +132,7 @@ def affine_from_fn(fn, n):
 
 
 class SyntheticPlan:
-    """融合段的发射计划：X(x_trans) → CNOT 网络 → MCX(controls) → CNOT 网络(逆) → X(x_trans)。"""
+    """Emission plan of a fused segment: X(x_trans) → CNOT network → MCX(controls) → CNOT network (inverse) → X(x_trans)."""
 
     __slots__ = ('x_trans', 'cnot_ops', 'controls')
 
@@ -169,15 +156,15 @@ class SyntheticPlan:
 
 def plan_from_affine(base, basis, n):
     """
-    RREF 规范构造（docs/CompleteBranch_algebra.md §3.6）：
-    仿射立方 e + span(basis) → SyntheticPlan(x_trans=0, cnot_ops, controls)。
+    RREF canonical construction (docs/CompleteBranch_algebra.md §3.6):
+    affine cube e + span(basis) → SyntheticPlan(x_trans=0, cnot_ops, controls).
 
-    约束行由自由列索引：x_f ⊕ Σ_p (r_p)_f x_p = c_f；
-    CNOT 网络控制 = 主元变量（不被修改）、目标 = 自由变量（次序无关）；
-    常数吸收进 MCX 极性。
+    Constraint rows are indexed by free columns: x_f ⊕ Σ_p (r_p)_f x_p = c_f;
+    CNOT network controls = pivot variables (unmodified), targets = free variables (order irrelevant);
+    constants are absorbed into the MCX polarity.
 
-    本函数保持**规范形**（唯一、可哈希），供融合池幂等重入；发射时的 CX 最小化
-    由 plan_min_cx 完成（T 不变，只换基）。
+    This function keeps the **canonical form** (unique, hashable) for idempotent re-entry into the
+    fusion pool; CX minimization at emission time is done by plan_min_cx (T unchanged, only a basis change).
     """
     pivots = rref([(b, 0) for b in basis], n)
     pivot_cols = {col for _, _, col in pivots}
@@ -195,7 +182,7 @@ def plan_from_affine(base, basis, n):
 
 
 def _plan_for_basis(base, basis, n):
-    """给定基构造发射计划,返回 (SyntheticPlan, CNOT 数)。plan_from_affine 的构造本体。"""
+    """Build the emission plan for a given basis, returning (SyntheticPlan, CNOT count). The construction body of plan_from_affine."""
     pivots = rref([(b, 0) for b in basis], n)
     pivot_cols = {col for _, _, col in pivots}
     free_cols = [f for f in range(n) if f not in pivot_cols]
@@ -213,11 +200,13 @@ def _plan_for_basis(base, basis, n):
 
 def plan_min_cx(base, basis, n):
     """
-    B-4:CX 最优发射计划。
+    B-4: CX-optimal emission plan.
 
-    同一仿射立方有多种基表示;在「规范基 + 所有两向量互加」的确定性候选集上
-    取 CNOT 数最小的构造(并列时保持规范基优先 ⇒ 确定性)。控制数不变 ⇒ T 不变,
-    仅 CNOT 网络规模下降。规范 plan(plan_from_affine)仍用于融合池的幂等/哈希。
+    The same affine cube has several basis representations; over the deterministic candidate set
+    "canonical basis + all pairwise vector sums" pick the construction with the smallest CNOT count
+    (ties keep the canonical basis first, hence deterministic). The control count is unchanged, so
+    T is unchanged and only the CNOT network shrinks. The canonical plan (plan_from_affine) is still
+    used for the fusion pool's idempotence/hashing.
     """
     candidates = [tuple(basis)]
     k = len(basis)
@@ -243,13 +232,13 @@ class CompleteBranch:
     def __init__(self, n, mask=0, bitstr=0, x_global=0, ft_lims=(),
                  source_branch=None, origin=0, synthetic=None):
         assert n >= 0
-        assert bitstr & ~mask == 0, 'bitstr 只允许在 mask 位上置位'
+        assert bitstr & ~mask == 0, 'bitstr may only set bits on mask positions'
         assert synthetic is None or (mask == 0 and bitstr == 0 and x_global == 0 and not ft_lims), \
-            '合成段与走线字段互斥'
+            'synthetic segment and walk fields are mutually exclusive'
         for ctrl, m0, m1 in ft_lims:
-            assert m0 & m1 == 0, 'ft 项需规范化：m0 & m1 == 0'
-            assert not ((mask >> ctrl) & 1), 'ft 控制变量不得同时是走边位置'
-            assert not ((m0 | m1) >> ctrl) & 1, 'ft 目标不得包含自身控制变量'
+            assert m0 & m1 == 0, 'ft term must be normalized: m0 & m1 == 0'
+            assert not ((mask >> ctrl) & 1), 'ft control variable must not also be a walk-edge position'
+            assert not ((m0 | m1) >> ctrl) & 1, 'ft targets must not include their own control variable'
 
         self.n = n
         self.mask = mask
@@ -263,19 +252,19 @@ class CompleteBranch:
         self._fn = None
         self._hash = None
 
-    # ------------------------------------------------------------ 结构 ----
+    # ------------------------------------------------------------ structure ----
 
     def is_walk(self):
         return self.synthetic is None
 
     def nctrl(self):
-        """MCX 控制数（走线型 = mask 位数；合成段 = controls 数）。"""
+        """MCX control count (walk-type = mask popcount; synthetic = number of controls)."""
         if self.synthetic is not None:
             return len(self.synthetic.controls)
         return self.mask.bit_count()
 
     def controls(self):
-        """MCX 控制集：sorted tuple[(var, polar)]。"""
+        """MCX control set: sorted tuple[(var, polar)]."""
         if self.synthetic is not None:
             return self.synthetic.controls
         return tuple((v, (self.bitstr >> v) & 1) for v in _bits(self.mask))
@@ -286,16 +275,16 @@ class CompleteBranch:
     def is_constant_one(self):
         return self.nctrl() == 0
 
-    # ------------------------------------------------------------ 派生 ----
+    # ------------------------------------------------------------ derived ----
 
     def affine(self):
-        """支撑集 S = base + span(basis) 的符号化推导（O(n^2)，无需 2^n 枚举）。"""
+        """Symbolic derivation of the support S = base + span(basis) (O(n^2), no 2^n enumeration)."""
         if self._affine is None:
             self._affine = self._compute_affine()
         return self._affine
 
     def fn(self):
-        """分支函数（2^n 位真值表）。"""
+        """Branch function (2^n-bit truth table)."""
         if self._fn is None:
             base, basis = self.affine()
             fn = 0
@@ -309,15 +298,15 @@ class CompleteBranch:
         return self._fn
 
     def direction_key(self):
-        """方向子空间 K 的规范基元组（融合候选分桶键）。"""
+        """Canonical-basis tuple of the direction subspace K (fusion-candidate bucket key)."""
         return self.affine().basis
 
     def cancel_key(self):
-        """函数真值表（相等 ⇒ 可抵消）。"""
+        """Function truth table (equality implies cancellability)."""
         return self.fn()
 
     def _constraint_rows(self):
-        """分支函数的约束行 (mask, const)（方程 mask·x ≡ const）。"""
+        """Constraint rows (mask, const) of the branch function (equation mask·x ≡ const)."""
         n = self.n
         masks = [1 << v for v in range(n)]
         consts = [0] * n
@@ -344,7 +333,7 @@ class CompleteBranch:
         return [(masks[v], consts[v] ^ ((self.bitstr >> v) & 1)) for v in _bits(self.mask)]
 
     def affine_rows(self):
-        """约束行的 RREF 规范形：tuple[(pivot, free_mask, const)]（主元升序）。"""
+        """RREF canonical form of the constraint rows: tuple[(pivot, free_mask, const)] (pivots ascending)."""
         pivots = rref(self._constraint_rows(), self.n)
         return tuple((col, mask ^ (1 << col), const) for mask, const, col in pivots)
 
@@ -368,7 +357,7 @@ class CompleteBranch:
                 base |= 1 << col
         return AffineInfo(base, tuple(basis))
 
-    # ------------------------------------------------------------ 相等 ----
+    # ------------------------------------------------------------ equality ----
 
     def _key(self):
         return (self.n, self.mask, self.bitstr, self.x_global, self.ft_lims, self.synthetic)
@@ -388,16 +377,16 @@ class CompleteBranch:
         return (f'CompleteBranch(n={self.n}, mask={self.mask:b}, bitstr={self.bitstr:b}, '
                 f'x_global={self.x_global:b}, ft_lims=[{ft}])')
 
-    # ------------------------------------------------------------ 发射 ----
+    # ------------------------------------------------------------ emission ----
 
     def to_circuit(self, qubit_mgr, target=None):
         """
-        发射为 MCXCircuit（Phase 4 的接入点；此处用于与 compute_tt 对账）。
-        调用方需已分配全部 n 个输入量子比特。
+        Emit as an MCXCircuit (Phase 4 entry point; used here to reconcile against compute_tt).
+        The caller must have already allocated all n input qubits.
         """
         circ = MCXCircuit(qubit_mgr, target)
         if self.synthetic is not None:
-            # B-4:发射用 CX 最优基(存储 plan 保持 RREF 规范形,控制数不变 ⇒ T 不变)
+            # B-4: emission uses the CX-optimal basis (the stored plan keeps the RREF canonical form; control count unchanged, so T unchanged)
             plan = plan_min_cx(*self.affine(), self.n)
             x_qubits = [qubit_mgr.get_input_qubit(v) for v in _bits(plan.x_trans)]
             circ.add_lim_operator(x_qubits)
@@ -432,72 +421,4 @@ class CompleteBranch:
         return circ
 
 
-# ---------------------------------------------------------------- 抽取 ----
-
-def extract_complete_branches(limbdd, n, origin=0, anomalies=None):
-    """
-    与 branch2circ 走法逐层镜像的压缩抽取（见 CompleteBranch_fusion_plan.md §7.8）。
-
-    对每个"根 → 终结结点"的路径生成一个 CompleteBranch：
-      - 走边位置（含 one-child 与分叉结点的所走边）→ mask 置位 + bitstr 记极性，
-        所走边 Lim 异或进 x_global；
-      - fallthrough 位置 → 两出边 Lim 规范化（公共部分上提 x_global）后按序追加 ft_lims；
-      - w0=w1=0 结点不应出现（记异常）；neg 边不应出现（记异常）；
-      - ft 目标必须位于其控制变量下方（记异常，测试会兜底）。
-    """
-    assert isinstance(limbdd, LimBDD)
-    assert n >= 0
-    assert not limbdd.root.neg, 'split_neg 后根边不应有 neg'
-
-    top_down = list(reversed(limbdd.var_order))
-    pos_of = {v: i for i, v in enumerate(top_down)}
-    terminator = limbdd.terminator
-    results = []
-
-    def walk(node, mask, bitstr, x_global, ft_lims, bits, bitnum):
-        if node is terminator:
-            results.append(CompleteBranch(n, mask, bitstr, x_global, ft_lims,
-                                          source_branch=SimpleBranch(bits, bitnum),
-                                          origin=origin))
-            return
-        if node.level == 0:
-            if anomalies is not None:
-                anomalies['zero_level'] += 1
-            return
-        w0, w1 = node.low.weight, node.high.weight
-        if w0 == 0 and w1 == 0:
-            if anomalies is not None:
-                anomalies['zero_node'] += 1
-            return
-        if node.low.neg or node.high.neg:
-            if anomalies is not None:
-                anomalies['neg_edge'] += 1
-
-        var = node.var_index
-        if node.low.node is node.high.node and w0 == 1 and w1 == 1:
-            # fallthrough：两出边 Lim 规范化（公共部分上提），项自顶向下追加。
-            m0 = abs_lim(node.low.lim, limbdd.var_order, anomalies)
-            m1 = abs_lim(node.high.lim, limbdd.var_order, anomalies)
-            common = m0 & m1
-            x_global ^= common
-            m0 ^= common
-            m1 ^= common
-            if m0 or m1:
-                for t in _bits(m0 | m1):
-                    if pos_of.get(t, -1) <= pos_of[var]:
-                        if anomalies is not None:
-                            anomalies['ft_target_above'] += 1
-                ft_lims = ft_lims + ((var, m0, m1),)
-            walk(node.low.node, mask, bitstr, x_global, ft_lims, bits, bitnum)
-        else:
-            for b, succ in ((0, node.low), (1, node.high)):
-                if succ.weight:
-                    walk(succ.node,
-                         mask | (1 << var),
-                         bitstr | (b << var),
-                         x_global ^ abs_lim(succ.lim, limbdd.var_order, anomalies),
-                         ft_lims,
-                         bits | (b << bitnum), bitnum + 1)
-
-    walk(limbdd.root.node, 0, 0, 0, (), 0, 0)
-    return results
+# ---------------------------------------------------------------- extraction ----

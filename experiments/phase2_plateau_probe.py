@@ -1,22 +1,22 @@
 # -*- coding: utf-8 -*-
 """
-阶段 2 假设检验探针(G-1a / G-1b):平台移动是否有价值?
+Phase 2 hypothesis-testing probe (G-1a / G-1b): are plateau moves worthwhile?
 
-对照口径(与生产后端逐行一致):
-  A 池 = LimBDDOracleSynthesizer._bdd_entries(tt)(图阶段产物,含根掩码);
-  C 池 = anf_pool(tt.bitstr, n)(纯代数产物)。
+Control setup (line-by-line consistent with the production backend):
+  A pool = OracleSynthesizer._bdd_entries(tt) (graph-stage product, with root masks);
+  C pool = anf_pool(tt.bitstr, n) (pure algebraic product).
 
-每池三变体:
-  1. strict       : fuse_pool_global(entries, n)                  —— 现状(gain > 0)
-  2. neutral      : fuse_pool_global(entries, n, accept_neutral=True)   —— G-1a(gain >= 0)
-  3. neutral+cat  : 同上,但池中先注入零成本催化剂三元组 {[x_j=1], [x_j=0], 1} × 所有 j
-                    (ΣT=0,XOR=0 ⇒ 池不变量保持)                        —— G-1b
+Three variants per pool:
+  1. strict       : fuse_pool_global(entries, n)                      -- current state (gain > 0)
+  2. neutral      : fuse_pool_global(entries, n, accept_neutral=True) -- G-1a (gain >= 0)
+  3. neutral+cat  : same as above, but first inject zero-cost catalyst triples {[x_j=1], [x_j=0], 1} for all j
+                    (ΣT=0, XOR=0 ⇒ pool invariant preserved)          -- G-1b
 
-生产级指标:base = min(A_strict, C_strict);improved = min(A_best, C_best)。
-判定:improved 相对 base 的 ΣT 缩减是否可观(参照决策惯例阈值 ~0.5%)。
+Production-grade metrics: base = min(A_strict, C_strict); improved = min(A_best, C_best).
+Judgment: whether the ΣT reduction of improved over base is significant (refer to the decision-convention threshold ~0.5%).
 
-输出:experiments/phase0_results/phase2_plateau_probe.txt
-用法:./venv/bin/python experiments/phase2_plateau_probe.py [--cases 200] [4 5 6 7 8]
+Output: experiments/phase0_results/phase2_plateau_probe.txt
+Usage: ./venv/bin/python experiments/phase2_plateau_probe.py [--cases 200] [4 5 6 7 8]
 """
 import argparse
 import os
@@ -28,15 +28,15 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from utils.TruthTable import TruthTable
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.CompleteBranch import CompleteBranch
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.CompleteBranch import CompleteBranch
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'phase2_plateau_probe.txt')
 
 
 def catalyst_entries(n):
-    """零成本催化剂三元组:[x_j=1] ⊕ [x_j=0] ⊕ 1 = 0(t(1)+t(1)+t(0) = 0)。"""
+    """Zero-cost catalyst triples: [x_j=1] ⊕ [x_j=0] ⊕ 1 = 0 (t(1)+t(1)+t(0) = 0)."""
     out = []
     for j in range(n):
         m = 1 << j
@@ -47,7 +47,7 @@ def catalyst_entries(n):
 
 
 def xor_pool(kept, standalone):
-    """池 XOR 不变量,在有效函数空间上验:kept 段先按根掩码 r 平移。"""
+    """Pool XOR invariant, checked in effective-function space: kept segments are first shifted by root mask r."""
     x = 0
     for cb, r, _ in kept:
         x ^= shift_fn(cb.fn(), r, cb.n)
@@ -57,18 +57,18 @@ def xor_pool(kept, standalone):
 
 
 def path_variants(entries, n, tt_bitstr, cats):
-    """一个池的三个变体;返回 (costs, best_cost, best_name)。校验每变体 XOR 不变量。"""
+    """Three variants of one pool; returns (costs, best_cost, best_name). Verifies the XOR invariant of each variant."""
     results = {}
     k0, s0 = fuse_pool_global(entries, n)
-    assert xor_pool(k0, s0) == tt_bitstr, 'strict XOR 不变量被破坏'
+    assert xor_pool(k0, s0) == tt_bitstr, 'strict XOR invariant violated'
     results['strict'] = pool_t_cost(k0, s0)
 
     k1, s1 = fuse_pool_global(entries, n, accept_neutral=True)
-    assert xor_pool(k1, s1) == tt_bitstr, 'neutral XOR 不变量被破坏'
+    assert xor_pool(k1, s1) == tt_bitstr, 'neutral XOR invariant violated'
     results['neutral'] = pool_t_cost(k1, s1)
 
     k2, s2 = fuse_pool_global(entries + cats, n, accept_neutral=True)
-    assert xor_pool(k2, s2) == tt_bitstr, 'neutral+cat XOR 不变量被破坏'
+    assert xor_pool(k2, s2) == tt_bitstr, 'neutral+cat XOR invariant violated'
     results['neutral+cat'] = pool_t_cost(k2, s2)
 
     best_name = min(results, key=results.get)
@@ -84,18 +84,18 @@ def run_case(synth, n, tt, cats):
 
     base = min(ra['strict'], rc['strict'])
     improved = min(ca_a, ca_c)
-    assert improved <= base, 'min 组合下不得劣化'
+    assert improved <= base, 'must not degrade under the min combination'
     return base, improved, na if ca_a <= ca_c else nc, ra, rc
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('ns', type=int, nargs='*', default=[4, 5, 6, 7, 8])
-    ap.add_argument('--cases', type=int, default=300, help='n=8 自动减半')
+    ap.add_argument('--cases', type=int, default=300, help='auto-halved for n=8')
     args = ap.parse_args()
 
-    synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
-    lines = ['阶段 2 假设检验:G-1a(gain>=0)/ G-1b(催化剂三元组) 的端到端收益测量', '']
+    synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+    lines = ['Stage-2 hypothesis test: end-to-end gain measurement of G-1a (gain>=0) / G-1b (catalyst triples)', '']
     for n in args.ns:
         cases = args.cases if n <= 7 else max(1, args.cases // 3)
         with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
@@ -127,17 +127,17 @@ def main():
             f'====== n = {n}({cases} cases,{wall:.1f}s)======',
             f'ΣT: base={s_base} improved={s_imp}(Δ {s_imp - s_base:+d}, {(s_base - s_imp) / max(s_base, 1):.2%})',
             f'cases: better={stat["better"]} same={stat["same"]}',
-            f'A 池最佳变体分布: strict={stat["A_win_strict"]} neutral={stat["A_win_neutral"]} neutral+cat={stat["A_win_neutral+cat"]}',
-            f'C 池最佳变体分布: strict={stat["C_win_strict"]} neutral={stat["C_win_neutral"]} neutral+cat={stat["C_win_neutral+cat"]}',
-            f'neutral 严格优于 strict: A {stat["A_best_neutral"]} 例 / C {stat["C_best_neutral"]} 例;'
-            f' cat 再优于 neutral: A {stat["A_best_cat"]} / C {stat["C_best_cat"]}',
+            f'A-pool best-variant distribution: strict={stat["A_win_strict"]} neutral={stat["A_win_neutral"]} neutral+cat={stat["A_win_neutral+cat"]}',
+            f'C-pool best-variant distribution: strict={stat["C_win_strict"]} neutral={stat["C_win_neutral"]} neutral+cat={stat["C_win_neutral+cat"]}',
+            f'neutral strictly better than strict: A {stat["A_best_neutral"]} cases / C {stat["C_best_neutral"]} cases;'
+            f' cat better still than neutral: A {stat["A_best_cat"]} / C {stat["C_best_cat"]}',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nresults written to {OUT}')
 
 
 if __name__ == '__main__':

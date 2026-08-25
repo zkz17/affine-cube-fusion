@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-P2 探针(方案 B 入场门槛):不动点段对旋转 vs GL 搜索的兑现率。
+P2 probe (Plan B entry gate): redemption rate of fixed-point pair rotation vs GL search.
 
-定理 B(docs/fprm_proxy_and_pair_rotation.md §2.1):可融合对 (A,B)(d=A⊕B ≠ 0),
-对任意 w ∈ K_d:{A,B} → {A∘τ_w, B∘τ_w} 保持池 XOR 与各段 T 精确不变,
-且改变与第三方段的陪集位置(融合关系真实改变)。
+Theorem B (docs/fprm_proxy_and_pair_rotation.md §2.1): for a fusible pair (A,B) (d=A⊕B ≠ 0),
+for any w ∈ K_d, {A,B} → {A∘τ_w, B∘τ_w} preserves the pool XOR and each segment's T exactly,
+while changing the coset position relative to third-party segments (the fusion relation truly changes).
 
-口径:
-  (a) FPRM 最优平移的融合不动点(现状 F 路径终值);
-  (b) 在 (a) 的不动点池上做对旋转 + 全池重融的局部搜索(T 单调下降,严格改进);
-  (c) GL 搜索(生产 gl_search,确定性)。
+Setup:
+  (a) fused fixed point of the FPRM optimal shift (current F-path final value);
+  (b) local search on the fixed-point pool of (a) via pair rotation + full-pool re-fusion (T monotonically decreases, strict improvement);
+  (c) GL search (production gl_search, deterministic).
 
-输出:ΣT(a/b/c)、兑现率 = (a−b)/(a−c)、移动/墙时统计。
-决策规则:兑现率 ≥ 30% 且墙时 ≤ GL/10 ⇒ 落地;15%~30% 交裁决;<15% 放弃。
+Output: ΣT(a/b/c), redemption rate = (a−b)/(a−c), move/wall-time statistics.
+Decision rule: redemption rate ≥ 30% and wall time ≤ GL/10 ⇒ adopt; 15%~30% send to adjudication; <15% abandon.
 """
 import argparse
 import os
@@ -23,17 +23,17 @@ from collections import Counter
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from limbdd.CompleteBranch import CompleteBranch, plan_from_affine
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
-from limbdd.fusion.ClosedForm import canonical_affine, fuse_closed
-from limbdd.fusion.GLSearch import fprm_best, gl_search
+from backend.CompleteBranch import CompleteBranch, plan_from_affine
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.ClosedForm import canonical_affine, fuse_closed
+from backend.fusion.GLSearch import fprm_best, gl_search
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'pair_rotation_probe.txt')
 PROFILE = {5: 20, 6: 20, 7: 20}
 
 
 def w_candidates(basis, cap=12):
-    """K_d 的确定性 w 候选:规范基向量 + 全部两两和(截断)。"""
+    """Deterministic w candidates from K_d: canonical basis vectors + all pairwise sums (truncated)."""
     out = list(basis)
     k = len(basis)
     for i in range(k):
@@ -43,7 +43,7 @@ def w_candidates(basis, cap=12):
 
 
 def rotate_pair(pool, i, j, w, n):
-    """第 i/j 段在有效函数空间上同时平移 w(合成表示,控制数精确不变)。"""
+    """Simultaneously shift segments i/j by w in effective-function space (synthetic representation; control count exactly unchanged)."""
     out = list(pool)
     for idx in (i, j):
         cb, r, key = pool[idx]
@@ -55,12 +55,13 @@ def rotate_pair(pool, i, j, w, n):
 
 def pair_rotation_search(pool0, n, max_moves=200, verbose=False):
     """
-    对旋转 + 全池重融的确定性局部搜索(探针口径,非增量)。
+    Deterministic local search via pair rotation + full-pool re-fusion (probe setup, not incremental).
 
-    pool0: 融合不动点的条目列表 [(cb, r, key)]。
-    每步枚举可融合且 d≠0 的对 × w 候选,取**第一个**严格改进(重融后 ΣT 下降),
-    接受后新池 = 重融输出的不动点;无改进即停。T 严格单调下降 ⇒ 自然终止。
-    返回 (ΣT, moves, wall, 统计)。
+    pool0: fixed-point entry list of the fusion [(cb, r, key)].
+    Each step enumerates fusible pairs with d≠0 × w candidates and takes the **first** strict improvement (ΣT drops after re-fusion);
+    after acceptance the new pool = the fixed point output by re-fusion; stops when there is no improvement.
+    T strictly monotonically decreases ⇒ termination is natural.
+    Returns (ΣT, moves, wall, statistics).
     """
     cost = pool_t_cost(*fuse_pool_global(pool0, n))
     pool = [(cb, r, key) for cb, r, key in pool0]
@@ -98,7 +99,7 @@ def pair_rotation_search(pool0, n, max_moves=200, verbose=False):
 
 
 def main():
-    lines = ['P2 探针:不动点段对旋转 vs GL 搜索的兑现率', '']
+    lines = ['P2 probe: fixed-point pair rotation vs GL search realization rate', '']
     for n, cases in PROFILE.items():
         data = [int(l.rstrip('\n')) for l in
                 open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
@@ -132,17 +133,17 @@ def main():
 
         msg = [
             f'====== n = {n}({cases} cases)======',
-            f'ΣT: (a) FPRM 不动点={s_a}  (b) 对旋转={s_b}  (c) GL={s_c}',
-            f'相对 (a): b {(s_b/s_a-1):+.2%}  c {(s_c/s_a-1):+.2%}',
-            f'兑现率 = (a−b)/(a−c) = {(s_a-s_b)/max(s_a-s_c,1):.2%}  (b 更优 {better_b}/{cases}, c 更优 {better_c}/{cases})',
-            f'旋转: 平均移动 {moves_sum/cases:.1f} 次, 每轮可融对均值 {pairs_sum/max(moves_sum,1):.1f}, '
-            f'墙时 {t_b/cases:.2f}s/例 vs GL {t_c/cases:.2f}s/例',
+            f'ΣT: (a) FPRM fixed point={s_a}  (b) pair rotation={s_b}  (c) GL={s_c}',
+            f'relative to (a): b {(s_b/s_a-1):+.2%}  c {(s_c/s_a-1):+.2%}',
+            f'realization rate = (a−b)/(a−c) = {(s_a-s_b)/max(s_a-s_c,1):.2%}  (b better {better_b}/{cases}, c better {better_c}/{cases})',
+            f'rotation: avg moves {moves_sum/cases:.1f}, avg fusable pairs per round {pairs_sum/max(moves_sum,1):.1f}, '
+            f'wall {t_b/cases:.2f}s/case vs GL {t_c/cases:.2f}s/case',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nresults written to {OUT}')
 
 
 if __name__ == '__main__':

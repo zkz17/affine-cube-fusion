@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-C 方案探测:G-2.1 平移超立方上的爬山搜索,相对全枚举的兑现率。
+Plan C probe: redemption rate of hill climbing on the G-2.1 shift hypercube relative to full enumeration.
 
-对每个用例:
-  cost(c) = pool_t_cost(fuse_pool_global(anf_pool(shift_fn(tt, c, n)), n))   (带缓存)
-  1. full      : 全枚举 2^n 个 c 的最优(基准真值);
-  2. climb0    : 从 c=0 最陡上升(Hamming 邻域、严格改进、缓存复用)的局部最优;
-  3. climb2    : 从 c=0 与 c=全 1 两个起点,取较优;
-  4. rand64    : 固定种子采样 64 个(生产 n≥9 的现行预算策略),含 c=0。
+For each test case:
+  cost(c) = pool_t_cost(fuse_pool_global(anf_pool(shift_fn(tt, c, n)), n))   (with cache)
+  1. full      : optimum of full enumeration over 2^n values of c (ground-truth baseline);
+  2. climb0    : local optimum of steepest ascent from c=0 (Hamming neighborhood, strict improvement, cache reuse);
+  3. climb2    : two starts, c=0 and c=all-ones, take the better;
+  4. rand64    : fixed-seed sample of 64 (the current budget policy for production n≥9), including c=0.
 
-兑现率 = (cost0 − cost_variant) / (cost0 − cost_full)(分母为 0 时跳过该例)。
+Redemption rate = (cost0 − cost_variant) / (cost0 − cost_full) (skip the case when the denominator is 0).
 
-输出:experiments/phase0_results/fprm_climb_probe.txt
-用法:./venv/bin/python experiments/fprm_climb_probe.py
+Output: experiments/phase0_results/fprm_climb_probe.txt
+Usage: ./venv/bin/python experiments/fprm_climb_probe.py
 """
 import argparse
 import os
@@ -25,7 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from utils.TruthTable import TruthTable
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'fprm_climb_probe.txt')
 
@@ -45,7 +45,7 @@ def make_cost_fn(tt_bitstr, n, cache):
 
 
 def climb(cost, start, n):
-    """最陡上升:每步评估全部 n 个 Hamming 邻居(缓存复用),严格改进才移动。"""
+    """Steepest ascent: evaluate all n Hamming neighbors at each step (cache reuse); move only on strict improvement."""
     cur = start
     while True:
         best, best_c = cost(cur), None
@@ -65,7 +65,7 @@ def main():
     ap.add_argument('--seed', type=int, default=20250821)
     args = ap.parse_args()
 
-    lines = ['C 方案探测:平移超立方爬山 vs 全枚举的兑现率', '']
+    lines = ['Plan-C probe: shift-hypercube climbing vs full enumeration realization rate', '']
     for n, cases in PROFILE.items():
         with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
             data = [int(line.rstrip('\n')) for line in f.readlines()[:cases]]
@@ -81,11 +81,11 @@ def main():
 
             base = cost(0)
 
-            # 全枚举(基准真值)
+            # Full enumeration (ground-truth baseline)
             full_best = min(cost(c) for c in range(1 << n))
 
-            # 爬山:c=0 单起点 / c=0 + 全1 双起点。
-            # 用独立缓存计数真实评估量(生产若选爬山,不会先做全枚举)。
+            # Hill climbing: c=0 single start / c=0 + all-ones dual start.
+            # Use a separate cache to count the true evaluation volume (if production adopts climbing, it will not do full enumeration first).
             cache_climb = {}
             cost_climb = make_cost_fn(tt.bitstr, n, cache_climb)
             before = len(cache_climb)
@@ -99,7 +99,7 @@ def main():
                 stat['climb2_evals'] += len(cache_climb) - before
                 c2_best = min(c0_best, b2)
 
-            # 固定种子采样 64(现行 n≥9 预算策略)
+            # fixed-seed sampling of 64 (the current n≥9 budget policy)
             sample = [0] + rng.sample(range(1, 1 << n), 63)
             r64_best = min(cost(c) for c in sample)
 
@@ -127,21 +127,21 @@ def main():
         msg = [
             f'====== n = {n}({cases} cases,{wall:.1f}s)======',
             f'ΣT: base={s_base} full={s_full} climb0={s_c0} climb2={s_c2} rand64={s_r64}',
-            f'相对 base: full {(s_full/s_base-1):+.2%} climb0 {(s_c0/s_base-1):+.2%} '
+            f'relative to base: full {(s_full/s_base-1):+.2%} climb0 {(s_c0/s_base-1):+.2%} '
             f'climb2 {(s_c2/s_base-1):+.2%} rand64 {(s_r64/s_base-1):+.2%}',
-            f'兑现率(有提升空间的 {room}/{stat["cases"]} 例): '
-            f'climb0 均值 {stat["real_c0"]/max(room,1):.1%}, climb2 {stat["real_c2"]/max(room,1):.1%}, '
+            f'realization rate ({room}/{stat["cases"]} cases with improvement room): '
+            f'climb0 mean {stat["real_c0"]/max(room,1):.1%}, climb2 {stat["real_c2"]/max(room,1):.1%}, '
             f'rand64 {stat["real_r64"]/max(room,1):.1%}',
-            f'命中全枚举最优: climb2 {stat["c2_optimal"]}/{room}, rand64 {stat["r64_optimal"]}/{room}',
-            f'平均净评估次数: climb0 {stat["climb0_evals"]/max(stat["cases"],1):.0f}, '
-            f'climb2 增量 {stat["climb2_evals"]/max(stat["cases"],1):.0f}(全枚举为 2^{n}={1 << n})',
+            f'hits of the full-enumeration optimum: climb2 {stat["c2_optimal"]}/{room}, rand64 {stat["r64_optimal"]}/{room}',
+            f'avg net evaluations: climb0 {stat["climb0_evals"]/max(stat["cases"],1):.0f}, '
+            f'climb2 delta {stat["climb2_evals"]/max(stat["cases"],1):.0f}(full enumeration is 2^{n}={1 << n})',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nresults written to {OUT}')
 
 
 if __name__ == '__main__':

@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-Phase 6 残差测量：成对完备性在真实流水线池上的工程检验（决策依据）。
+Phase 6 residual measurement: engineering check of pairwise completeness on the real pipeline pool (decision input).
 
-层一（本征残差）：对 fuse_pool_global 不动点池（已无任何正收益 2-to-1 对），
-  - k=3：全枚举三元组，d = f_i⊕f_j⊕f_k 为仿射立方且正收益者 = 2-to-1 贪心不可达的机会；
-  - k≥4：随机抽样子集（size 4..5）同样判定（抽样口径，见输出）；
-层二（贪心残差）：随机打乱条目顺序重跑 fuse_pool_global 若干次，观察最终 ΣT 是否变化
-  （顺序敏感性 ⟹ 贪心匹配存在被锁死的机会）。
+Layer 1 (intrinsic residual): on the fuse_pool_global fixed-point pool (no positive-gain 2-to-1 pairs left),
+  - k=3: enumerate all triples; a triple with d = f_i⊕f_j⊕f_k an affine cube and positive gain is an opportunity unreachable by 2-to-1 greedy;
+  - k≥4: randomly sample subsets (size 4..5) with the same test (sampling basis, see output);
+Layer 2 (greedy residual): rerun fuse_pool_global several times with the entry order shuffled and observe whether the final ΣT changes
+  (order sensitivity ⟹ the greedy matching has locked-out opportunities).
 
-用法：python residual_measurement.py [--n4 200 --n5 200 --n6 100 --n7 50 ...]
-输出：stdout + experiments/phase0_results/residual_measurement_{n}.txt
+Usage: python residual_measurement.py [--n4 200 --n5 200 --n6 100 --n7 50 ...]
+Output: stdout + experiments/phase0_results/residual_measurement_{n}.txt
 """
 import argparse
 import collections
@@ -18,21 +18,22 @@ import random
 import sys
 import time
 
-# 项目根目录（脚本位于 experiments/ 下，故上溯一级）；加入 sys.path 保证 limbdd/utils 可导入
+# Project root (script lives under experiments/, so go up one level); add to sys.path so limbdd/utils is importable
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 EXPERIMENTS = os.path.join(ROOT, 'experiments')
 
 from utils.TruthTable import TruthTable
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.CompleteBranch import abs_lim, extract_complete_branches, is_affine_cube, t_cost
-from limbdd.fusion.BranchFusion import fuse_pool_global, shift_fn
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.CompleteBranch import is_affine_cube, t_cost
+from limbdd.Extraction import abs_lim, extract_complete_branches
+from backend.fusion.BranchFusion import fuse_pool_global, shift_fn
 
 
 def case_entries(tt, reorder=True):
-    """完整图阶段（与 process_fused_global 同构）后收集 (cb, root_mask, piece_idx) 条目。"""
-    syn = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True)
+    """Collect (cb, root_mask, piece_idx) entries after the complete graph phase (isomorphic to process_fused_global)."""
+    syn = OracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True)
     syn.construct(tt)
     pieces = syn._collect_pieces_fused()
     n = tt.num_var
@@ -45,7 +46,7 @@ def case_entries(tt, reorder=True):
 
 
 def final_pool_eff(entries, n, rng=None):
-    """fuse_pool_global 不动点池 → [(cb, eff_fn, t)]；rng 提供时打乱条目顺序（层二）。"""
+    """fuse_pool_global fixed-point pool → [(cb, eff_fn, t)]; shuffle entry order when rng is provided (layer 2)."""
     if rng is not None:
         entries = rng.sample(entries, len(entries))
     kept, standalone = fuse_pool_global(entries, n)
@@ -58,7 +59,7 @@ def measure_case(entries, n, k4_sizes, k4_samples, shuffles, rng):
     pool = final_pool_eff(entries, n)
     n_pool = len(pool)
 
-    # ---- 层一 k=3 全枚举 ----
+    # ---- Layer 1 k=3 full enumeration ----
     hits3, nonpos3 = [], 0
     for i in range(n_pool):
         for j in range(i + 1, n_pool):
@@ -73,7 +74,7 @@ def measure_case(entries, n, k4_sizes, k4_samples, shuffles, rng):
                 else:
                     nonpos3 += 1
 
-    # ---- 层一 k>=4 抽样 ----
+    # ---- Layer 1 k>=4 sampling ----
     hits4 = []
     for s in k4_sizes:
         if n_pool < s:
@@ -92,7 +93,7 @@ def measure_case(entries, n, k4_sizes, k4_samples, shuffles, rng):
             if gain > 0:
                 hits4.append((s, dim, gain))
 
-    # ---- 层二 贪心顺序敏感性 ----
+    # ---- Layer 2 greedy order sensitivity ----
     t_vals = []
     for _ in range(shuffles):
         p2 = final_pool_eff(entries, n, rng)
@@ -122,8 +123,8 @@ def main():
     ap.add_argument('--n5', type=int, default=200)
     ap.add_argument('--n6', type=int, default=100)
     ap.add_argument('--n7', type=int, default=50)
-    ap.add_argument('--k4-samples', type=int, default=500, help='每个 k>=4 尺寸的抽样子集数')
-    ap.add_argument('--shuffles', type=int, default=10, help='层二打乱重跑次数')
+    ap.add_argument('--k4-samples', type=int, default=500, help='number of sampled subsets per k>=4 size')
+    ap.add_argument('--shuffles', type=int, default=10, help='number of layer-2 shuffle reruns')
     ap.add_argument('--seed', type=int, default=20250815)
     args = ap.parse_args()
 
@@ -133,7 +134,7 @@ def main():
             continue
         cases = load_cases(n, count, args.seed)
         agg = collections.Counter()
-        lines = [f'# 残差测量 n={n} cases={len(cases)} k4_samples={args.k4_samples} shuffles={args.shuffles}']
+        lines = [f'# residual measurement n={n} cases={len(cases)} k4_samples={args.k4_samples} shuffles={args.shuffles}']
         t0 = time.time()
         for ci, tt in enumerate(cases):
             try:
@@ -166,12 +167,12 @@ def main():
         nc = agg['cases']
         summary = [
             '',
-            f'# n={n} 汇总（{nc} cases，{time.time()-t0:.1f}s）:',
-            f'  不动点池规模均值: {agg["n_pool"]/max(1,nc):.1f}; 最终 ΣT: {agg["t_final"]}',
-            f'  层一 k=3 正收益残差: {agg["hits3"]} 个（收益上界 {agg["hits3_gain"]}）；'
-            f'非正收益仿射三元组: {agg["nonpos3"]}',
-            f'  层一 k>=4 抽样残差: {agg["hits4"]} 个（收益上界 {agg["hits4_gain"]}）',
-            f'  层二 贪心顺序敏感: {agg["greedy_vary"]}/{nc} cases 有 T 变化（总缺口 {agg["greedy_gap"]}）',
+            f'# n={n} summary ({nc} cases, {time.time()-t0:.1f}s):',
+            f'  fixed-point pool size mean: {agg["n_pool"]/max(1,nc):.1f}; final ΣT: {agg["t_final"]}',
+            f'  layer-1 k=3 positive-gain residual: {agg["hits3"]} (gain upper bound {agg["hits3_gain"]});'
+            f'non-positive-gain affine triples: {agg["nonpos3"]}',
+            f'  layer-1 k>=4 sampled residual: {agg["hits4"]} (gain upper bound {agg["hits4_gain"]})',
+            f'  layer-2 greedy order sensitivity: {agg["greedy_vary"]}/{nc} cases with T variation (total gap {agg["greedy_gap"]})',
         ]
         print('\n'.join(summary))
         lines += summary
@@ -179,7 +180,7 @@ def main():
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'w') as f:
             f.write('\n'.join(lines) + '\n')
-        print(f'[已写入 {out}]')
+        print(f'[written to {out}]')
 
 
 if __name__ == '__main__':

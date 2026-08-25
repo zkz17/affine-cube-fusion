@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Phase 0: 分支级融合机会统计（只测量，不修改 pipeline 与算法）。
+Phase 0: branch-level fusion opportunity statistics (measurement only; pipeline and algorithm unchanged).
 
-方法：用 ProbeSynthesizer（LimBDDOracleSynthesizer 子类）覆写 limbdd2circ 的"电路生成"
-部分——图阶段（perform_split / collect_branches / append_temp_to_list）与真实流水线完全一致，
-但在生成电路处改为：
-  1. 抽取该子图当时全部分支的规范化签名（Lim 换算到绝对变量位空间）；
-  2. 用签名级模拟器做全局验证：XOR(所有被综合子图的全部分支段) == 原真值表；
-  3. 统计规则 1/2/3 候选对与收益（规则 3 为上界估计）；
-  4. 可选：对同图完全路径对抽样执行 pivot_to + 嵌套综合，实测融合后 T。
+Method: use ProbeSynthesizer (an OracleSynthesizer subclass) to override the "circuit generation"
+part of limbdd2circ — the graph phase (perform_split / collect_branches / append_temp_to_list) is
+identical to the real pipeline, but circuit generation is replaced with:
+  1. extract normalized signatures of all branches currently in the subgraph (Lim mapped to the absolute variable bit space);
+  2. run signature-level global verification: XOR(all branch segments of every synthesized subgraph) == original truth table;
+  3. count rule 1/2/3 candidate pairs and gains (rule 3 is an upper-bound estimate);
+  4. optional: sample complete path pairs from the same graph, execute pivot_to + nested synthesis, and measure the fused T.
 
-输出：stdout + experiments/phase0_results/phase0_results.txt（可用 --out 覆盖）
+Output: stdout + experiments/phase0_results/phase0_results.txt (override with --out)
 """
 import argparse
 import collections
@@ -19,7 +19,7 @@ import random
 import sys
 import time
 
-# 项目根目录（脚本位于 experiments/ 下，故上溯一级）；加入 sys.path 保证 limbdd/utils 可导入
+# Project root (script lives under experiments/, so go up one level); add to sys.path so limbdd/utils is importable
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -27,7 +27,7 @@ EXPERIMENTS = os.path.join(ROOT, 'experiments')
 
 from config import config
 from utils.TruthTable import TruthTable
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from backend.OracleSynthesizer import OracleSynthesizer
 from limbdd.LimBDD import SimpleBranch, LimBDD
 from limbdd.LimBDDManager import LimBDDManager
 from limbdd.Node import LimBDDNode, LimBDDSignal
@@ -37,12 +37,12 @@ from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXG
 
 
 def t_cost(k):
-    """k 控 MCX 的 T 代价（单一事实源：config.py 的 't_cost'，近线性新模型）。"""
+    """T cost of a k-controlled MCX (single source of truth: 't_cost' in config.py, near-linear new model)."""
     return config['t_cost'](k)
 
 
 def abs_lim(lim, var_order, anomalies):
-    """把图内 Lim（层位空间）换算为绝对变量位空间：bit k = 变量 k。"""
+    """Convert an in-graph Lim (level space) to absolute variable bit space: bit k = variable k."""
     m = 0
     for j in range(lim.bitnum):
         if (lim.bitstr >> j) & 1:
@@ -53,14 +53,14 @@ def abs_lim(lim, var_order, anomalies):
     return m
 
 
-# ---------------------------------------------------------------- 抽取 ----
+# ---------------------------------------------------------------- extraction ----
 
 def extract_branches(limbdd, anomalies):
     """
-    与 branch2circ 走法逐层镜像地抽取分支签名。
-    返回 [(sig, branch_bitstr, branch_bitnum)]：
-      sig = (position, ...) 自顶向下，position = (var, ft, bit, w0, w1, lim0, lim1)
-      ft=1 表示 fallthrough（不消耗分支 bit）；lim 均为绝对变量位空间掩码。
+    Extract branch signatures mirroring the branch2circ walk level by level.
+    Returns [(sig, branch_bitstr, branch_bitnum)]:
+      sig = (position, ...) top-down; position = (var, ft, bit, w0, w1, lim0, lim1)
+      ft=1 means fallthrough (consumes no branch bit); lim values are absolute variable bit-space masks.
     """
     terminator = limbdd.terminator
     results = []
@@ -69,7 +69,7 @@ def extract_branches(limbdd, anomalies):
         if node is terminator:
             results.append((tuple(positions), bits, bitnum))
             return
-        if node.level == 0:  # 非终结的 level-0 结点不应出现
+        if node.level == 0:  # a non-terminal level-0 node should not occur
             anomalies['zero_level'] += 1
             return
         w0, w1 = node.low.weight, node.high.weight
@@ -94,10 +94,10 @@ def extract_branches(limbdd, anomalies):
     return results
 
 
-# ---------------------------------------------------------------- 模拟器 ----
+# ---------------------------------------------------------------- simulator ----
 
 def sim_sig(sig, x):
-    """在输入 x（绝对变量位空间）上模拟一个分支段：返回目标翻转位。"""
+    """Simulate one branch segment on input x (absolute variable bit space); return the target flip bit."""
     state = x
     ok = True
     for (var, ft, bit, w0, w1, l0, l1) in sig:
@@ -114,7 +114,7 @@ def sim_sig(sig, x):
 
 
 def sigs_xor_tt(sigs, root_mask, n):
-    """XOR(所有分支段) 在输入 x^root_mask 上的真值表（bitstr over 2^n）。"""
+    """Truth table (bitstr over 2^n) of XOR(all branch segments) on input x^root_mask."""
     tt = 0
     for x in range(1 << n):
         xr = x ^ root_mask
@@ -126,11 +126,12 @@ def sigs_xor_tt(sigs, root_mask, n):
     return tt
 
 
-# ---------------------------------------------------------------- 探针合成器 ----
+# ---------------------------------------------------------------- probe synthesizer ----
 
-class ProbeSynthesizer(LimBDDOracleSynthesizer):
+class ProbeSynthesizer(OracleSynthesizer):
     """
-    覆写 limbdd2circ：图阶段与真实流水线完全一致，电路生成处改为记录分支签名。
+    Override limbdd2circ: the graph phase is identical to the real pipeline; the circuit-generation
+    step instead records branch signatures.
     recorded: [(sig, root_mask, origin, branch_bitstr, branch_bitnum)]
     """
 
@@ -144,7 +145,7 @@ class ProbeSynthesizer(LimBDDOracleSynthesizer):
         self.origin_counter = 0
 
     def limbdd2circ(self, limbdd, anc_num, collect_br=True):
-        # ---- 与真实 limbdd2circ 相同的图阶段 ----
+        # ---- same graph phase as the real limbdd2circ ----
         if not limbdd.root.weight:
             return MCXCircuit()
         if collect_br:
@@ -152,10 +153,10 @@ class ProbeSynthesizer(LimBDDOracleSynthesizer):
         else:
             self.limbdd_mgr.perform_split(limbdd)
         self.limbdd_mgr.append_temp_to_list()
-        if not limbdd.root.weight:  # 吸收/拆分可能把该片清零（与真实 limbdd2circ 一致）
+        if not limbdd.root.weight:  # absorption/splitting may zero this piece (same as the real limbdd2circ)
             return MCXCircuit()
 
-        # ---- 原代码在此生成电路；我们改为记录分支签名 ----
+        # ---- the original code generates the circuit here; we record branch signatures instead ----
         origin = self.origin_counter
         self.origin_counter += 1
         anomalies = collections.Counter()
@@ -167,10 +168,10 @@ class ProbeSynthesizer(LimBDDOracleSynthesizer):
         if self.pivot_sample > 0:
             self._pivot_sample_inline(limbdd, res, anomalies)
 
-        return MCXCircuit()  # 电路生成被省略（Phase 0 只测量）
+        return MCXCircuit()  # circuit generation omitted (Phase 0 only measures)
 
     def _pivot_sample_inline(self, limbdd, res, anomalies):
-        """对同图内"函数级可融合对"（相等或仿射立方）抽样执行 pivot_to 实测。"""
+        """For same-graph "function-level fusible pairs" (equal or affine cube), run a sampled pivot_to measurement."""
         if self.pivot_sample <= 0 or len(res) < 2:
             return
         fns = [sigs_xor_tt([sig], 0, self.n) for (sig, bits, bitnum) in res]
@@ -199,7 +200,7 @@ class ProbeSynthesizer(LimBDDOracleSynthesizer):
             try:
                 pivot_limbdd, x_map, cx_map = LimBDDManager.pivot_to(
                     limbdd.root.node, SimpleBranch(bits_a, bitnum_a), SimpleBranch(bits_b, bitnum_b), limbdd)
-                nested = LimBDDOracleSynthesizer(ancilla_num=0, fused_backend=False)
+                nested = OracleSynthesizer(ancilla_num=0, fused_backend=False)
                 nested.qubit_mgr = self.qubit_mgr
                 nested.circ = MCXCircuit(self.qubit_mgr)
                 nested.limbdd_mgr.limbdd = pivot_limbdd
@@ -229,14 +230,14 @@ class ProbeSynthesizer(LimBDDOracleSynthesizer):
                                            'fused_t': None, 'ok': False, 'err': str(e)})
 
 
-# ---------------------------------------------------------------- 统计 ----
+# ---------------------------------------------------------------- statistics ----
 
 def nctrl(sig):
     return sum(1 for p in sig if p[1] == 0)
 
 
 def is_affine_subspace(d, n):
-    """d 的支撑位集合是否为 GF(2)^n 的仿射子空间；返回 (True, 维数 k)。"""
+    """Whether d's support-bit set is an affine subspace of GF(2)^n; returns (True, dimension k)."""
     bits = [i for i in range(1 << n) if (d >> i) & 1]
     if not bits:
         return False, 0
@@ -269,7 +270,7 @@ def case_stats(n, tt, label, recorded, anomalies, pivot_records):
         'pivot_fused_t_sum': 0, 'pivot_est_t_sum': 0, 'pivot_pairs': 0, 'pivot_base_t_sum': 0,
     }
 
-    # ---- 全局验证：XOR(所有被综合子图的分支段) == 原真值表 ----
+    # ---- global verification: XOR(all branch segments of all synthesized subgraphs) == original truth table ----
     grouped = collections.defaultdict(list)
     for (sig, root_mask, origin, bits, bitnum) in recorded:
         grouped[origin].append((sig, root_mask))
@@ -286,7 +287,7 @@ def case_stats(n, tt, label, recorded, anomalies, pivot_records):
         segs.append((sig, bits, bitnum, origin, nctrl(sig)))
     st['n_branch'] = len(segs)
 
-    # ---- 规则 1：完全相同签名 ----
+    # ---- rule 1: identical signatures ----
     cnt = collections.Counter(s[0] for s in segs)
     cnt_origin = collections.Counter((s[0], s[3]) for s in segs)
     for sig, c in cnt.items():
@@ -299,7 +300,7 @@ def case_stats(n, tt, label, recorded, anomalies, pivot_records):
         cross -= c * (c - 1) // 2
     st['rule1_cross'] = cross
 
-    # ---- 规则 2：单位置 0/1 差异（p 处 w0=w1=1） ----
+    # ---- rule 2: single-position 0/1 difference (at position p, w0=w1=1) ----
     buckets = {}
     for sig, bits, bitnum, origin, k in segs:
         for p, pos in enumerate(sig):
@@ -318,7 +319,7 @@ def case_stats(n, tt, label, recorded, anomalies, pivot_records):
         c0, c1 = collections.Counter(L0), collections.Counter(L1)
         st['rule2_cross'] += npair - sum(c0[o] * c1[o] for o in set(c0) & set(c1))
 
-    # ---- 规则 3：完全路径（全位置非 fallthrough 且 w0=w1=1） ----
+    # ---- rule 3: complete paths (no fallthrough anywhere and w0=w1=1) ----
     complete = [(sig, bits, bitnum, origin, k) for (sig, bits, bitnum, origin, k) in segs
                 if all(p[1] == 0 and p[3] == 1 and p[4] == 1 for p in sig)]
     st['complete'] = len(complete)
@@ -349,9 +350,10 @@ def case_stats(n, tt, label, recorded, anomalies, pivot_records):
             else:
                 st['rule3_dge2_pairs'] += pairs
 
-    # ---- 函数级机会：分支函数 XOR 的支撑集是否为仿射子空间（可融合为单分支段的精确条件） ----
+    # ---- function-level opportunity: whether the support set of the XOR of two branch functions is an
+    #      affine subspace (the exact condition for fusing into one branch segment) ----
     fns = [sigs_xor_tt([sig], 0, n) for (sig, bits, bitnum, origin, k) in segs]
-    cand_pairs = []  # (gain, i, j) 供贪心匹配
+    cand_pairs = []  # (gain, i, j) for greedy matching
     for i in range(len(segs)):
         for j in range(i + 1, len(segs)):
             d = fns[i] ^ fns[j]
@@ -385,13 +387,13 @@ def case_stats(n, tt, label, recorded, anomalies, pivot_records):
         used.add(j)
         st['affine_match_gain'] += gain
 
-    # ---- T 基线 ----
+    # ---- T baseline ----
     st['flat_t'] = sum(t_cost(k) for (sig, bits, bitnum, origin, k) in segs)
     st['fused_t_est'] = fused_t_estimate(segs)
 
-    # ---- pivot 实测汇总 ----
+    # ---- pivot measurement summary ----
     for r in pivot_records:
-        if r['fused_t'] is None or not r['ok']:  # 契约失败/异常：不计入收益
+        if r['fused_t'] is None or not r['ok']:  # contract violation/exception: not counted in the gain
             st['pivot_fail'] += 1
             continue
         st['pivot_pairs'] += 1
@@ -404,7 +406,7 @@ def case_stats(n, tt, label, recorded, anomalies, pivot_records):
 
 
 def fused_t_estimate(segs):
-    """保守估计：规则 1 抵消 + 规则 2 融合（再抵消）后的 T。规则 3 不计入。"""
+    """Conservative estimate: T after rule-1 cancellation + rule-2 fusion (then cancellation). Rule 3 not counted."""
     pool = collections.Counter(s[0] for s in segs)
     pool = collections.Counter({sig: c % 2 for sig, c in pool.items() if c % 2})
     if not pool:
@@ -433,7 +435,7 @@ def fused_t_estimate(segs):
             remaining[a] -= 1
             remaining[b] -= 1
             p = next(idx for idx, pos in enumerate(key) if pos[1] == 0 and pos[2] == -1)
-            # a 走 low（bit=0），b 走 high（bit=1）：融合为 fallthrough，lim0=a 的 low 边，lim1=b 的 high 边
+            # a walks low (bit=0), b walks high (bit=1): fused into a fallthrough, lim0 = a's low edge, lim1 = b's high edge
             f = a[:p] + ((key[p][0], 1, -1, 1, 1, a[p][5], b[p][6]),) + a[p + 1:]
             fused[f] += 1
             m -= 1
@@ -457,7 +459,7 @@ def count_t_cost(qc):
     return t
 
 
-# ---------------------------------------------------------------- 用例 ----
+# ---------------------------------------------------------------- cases ----
 
 def load_cases(args):
     cases = []
@@ -494,15 +496,15 @@ def fmt_case(st):
 
 
 def main():
-    ap = argparse.ArgumentParser(description='Phase 0 分支融合机会统计')
-    ap.add_argument('--reorder', type=int, default=1, help='是否变量重排 (0/1)')
-    ap.add_argument('--config-cases', action='store_true', help='包含 config case_pool 用例')
-    ap.add_argument('--config-all', action='store_true', help='包含 config 中被 skip 的用例')
+    ap = argparse.ArgumentParser(description='Phase 0 branch fusion opportunity statistics')
+    ap.add_argument('--reorder', type=int, default=1, help='variable reordering on/off (0/1)')
+    ap.add_argument('--config-cases', action='store_true', help='include config case_pool cases')
+    ap.add_argument('--config-all', action='store_true', help='include cases skipped in config')
     ap.add_argument('--n4', type=int, default=2000)
     ap.add_argument('--n5', type=int, default=1000)
     ap.add_argument('--n6', type=int, default=300)
     ap.add_argument('--n7', type=int, default=150)
-    ap.add_argument('--pivot-sample', type=int, default=0, help='每子图的 pivot 实测对数 (0=关)')
+    ap.add_argument('--pivot-sample', type=int, default=0, help='pivot measurement pairs per subgraph (0=off)')
     ap.add_argument('--seed', type=int, default=20250815)
     ap.add_argument('--out', default=os.path.join('experiments', 'phase0_results', 'phase0_results.txt'))
     args = ap.parse_args()
@@ -515,7 +517,7 @@ def main():
 
     rng = random.Random(args.seed)
     cases = load_cases(args)
-    emit(f'# Phase 0 分支融合机会统计  reorder={args.reorder}  cases={len(cases)}  '
+    emit(f'# Phase 0 branch fusion opportunity statistics  reorder={args.reorder}  cases={len(cases)}  '
          f'n4={args.n4} n5={args.n5} n6={args.n6} n7={args.n7} pivot_sample={args.pivot_sample}')
 
     anomalies = collections.Counter()
@@ -557,48 +559,48 @@ def main():
             emit(f'[{ci+1}/{len(cases)}] n={num_var} tt={tt} FAILED: {type(e).__name__}: {e}')
 
     emit('')
-    emit('# ===== 按 n 汇总 =====')
+    emit('# ===== per-n summary =====')
     for n in sorted(agg):
         a = agg[n]
         nc = a['cases']
         emit(f'-- n={n} ({nc} cases) --')
-        emit(f'  子图/分支:        {a["n_sub"]/nc:.1f} / {a["n_branch"]/nc:.1f} (每 case 均值)')
-        emit(f'  语法级 规则1相同对: {a["rule1_pairs"]} (跨子图 {a["rule1_cross"]}), 收益 {a["rule1_gain"]}; '
-             f'规则2单位置对: {a["rule2_pairs"]} (跨子图 {a["rule2_cross"]}), 收益 {a["rule2_gain"]}')
-        emit(f'  函数级 相等对:    {a["func1_pairs"]} (收益 {a["func1_gain"]}); '
-             f'仿射立方可融合对: {a["affine_pairs"]} (跨子图 {a["affine_pairs_cross"]}), '
-             f'总收益 {a["affine_gain"]} (正收益 {a["affine_gain_pos"]}), '
-             f'贪心匹配收益 {a["affine_match_gain"]}, 维数分布 {dict(sorted(a["affine_dim_hist"].items()))}')
-        emit(f'  规则3 完全路径:   {a["complete"]} 个; 同长对 {a["rule3_same_pairs"]}, '
-             f'上界收益 {a["rule3_same_gain_ub"]}; 长度差1对 {a["rule3_d1_pairs"]} '
-             f'(收益 {a["rule3_d1_gain"]}); 长度差>=2对 {a["rule3_dge2_pairs"]}')
-        emit(f'  规则3 同长对一致位数分布: {dict(sorted(a["agree_hist"].items()))}')
-        emit(f'  T: 当前流水线 Σ={a["actual_t"]} (均 {a["actual_t"]/nc:.1f}) | '
-             f'拍平 Σ={a["flat_t"]} (均 {a["flat_t"]/nc:.1f}) | '
-             f'规则1+2 融合 Σ={a["fused_t_est"]} (均 {a["fused_t_est"]/nc:.1f})')
+        emit(f'  subgraphs/branches: {a["n_sub"]/nc:.1f} / {a["n_branch"]/nc:.1f} (mean per case)')
+        emit(f'  syntactic rule1 identical pairs: {a["rule1_pairs"]} (cross-subgraph {a["rule1_cross"]}), gain {a["rule1_gain"]}; '
+             f'rule2 single-position pairs: {a["rule2_pairs"]} (cross-subgraph {a["rule2_cross"]}), gain {a["rule2_gain"]}')
+        emit(f'  function-level equal pairs:    {a["func1_pairs"]} (gain {a["func1_gain"]}); '
+             f'affine-cube fusible pairs: {a["affine_pairs"]} (cross-subgraph {a["affine_pairs_cross"]}), '
+             f'total gain {a["affine_gain"]} (positive gain {a["affine_gain_pos"]}), '
+             f'greedy-match gain {a["affine_match_gain"]}, dim histogram {dict(sorted(a["affine_dim_hist"].items()))}')
+        emit(f'  rule3 complete paths:   {a["complete"]}; same-length pairs {a["rule3_same_pairs"]}, '
+             f'upper-bound gain {a["rule3_same_gain_ub"]}; length-diff-1 pairs {a["rule3_d1_pairs"]} '
+             f'(gain {a["rule3_d1_gain"]}); length-diff>=2 pairs {a["rule3_dge2_pairs"]}')
+        emit(f'  rule3 same-length agree-bit histogram: {dict(sorted(a["agree_hist"].items()))}')
+        emit(f'  T: current pipeline Σ={a["actual_t"]} (mean {a["actual_t"]/nc:.1f}) | '
+             f'flattened Σ={a["flat_t"]} (mean {a["flat_t"]/nc:.1f}) | '
+             f'rule1+2 fused Σ={a["fused_t_est"]} (mean {a["fused_t_est"]/nc:.1f})')
         if a.get('pivot_pairs'):
-            emit(f'  pivot 实测(同图函数级对): {a["pivot_pairs"]} 对, 基线 Σ2T={a["pivot_base_t_sum"]}, '
-                 f'估计融合 Σ={a["pivot_est_t_sum"]}, 实测融合 Σ={a["pivot_fused_t_sum"]} '
-                 f'(vs 基线 {a["pivot_fused_t_sum"]/max(1,a["pivot_base_t_sum"]):.2%}), '
+            emit(f'  pivot measurement (same-graph function-level pairs): {a["pivot_pairs"]} pairs, baseline Σ2T={a["pivot_base_t_sum"]}, '
+                 f'estimated fused Σ={a["pivot_est_t_sum"]}, measured fused Σ={a["pivot_fused_t_sum"]} '
+                 f'(vs baseline {a["pivot_fused_t_sum"]/max(1,a["pivot_base_t_sum"]):.2%}), '
                  f'ok={a["pivot_ok"]}, fail={a["pivot_fail"]}')
-        emit(f'  全局验证失败: {a.get("invalid", 0)}')
+        emit(f'  global verification failures: {a.get("invalid", 0)}')
     emit('')
-    emit('# Top 10 cases by 贪心匹配收益:')
+    emit('# Top 10 cases by greedy-match gain:')
     for gain, n, tt in sorted(top_cases, reverse=True)[:10]:
         emit(f'  n={n} tt={tt} gain={gain}')
     emit('')
-    emit(f'# 异常计数: {dict(anomalies)}')
-    emit(f'# 总耗时 {time.time()-t0:.1f}s')
+    emit(f'# anomaly counts: {dict(anomalies)}')
+    emit(f'# total time {time.time()-t0:.1f}s')
 
     out_path = os.path.join(ROOT, args.out)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n[已写入 {args.out}]')
+    print(f'\n[written to {args.out}]')
 
 
 def actual_pipeline_t(tt, reorder):
-    syn = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0)
+    syn = OracleSynthesizer(reorder=reorder, ancilla_num=0)
     syn.synthesize(tt)
     qc = to_qiskit(syn.circ)
     return count_t_cost(qc)

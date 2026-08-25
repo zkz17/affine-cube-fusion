@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-P6a 探针:exorlink-δ 的机会密度与 δ=2 符号预判的批量验证(n ≤ 7)。
+P6a probe: bulk verification of exorlink-δ opportunity density and the δ=2 sign prediction (n ≤ 7).
 
-三段快照,逐池统计所有段对的经典距离 δ:
-  ANF 池     : anf_pool(原始 f)                      —— 全为普通立方;
-  BDD 池     : 图阶段产物(_bdd_entries,含根掩码)     —— 一般仿射段;
-  不动点池   : FPRM 最优平移的融合不动点             —— 走线/合成混合。
-一般仿射段用 canonical_affine 的 RREF 约束行 (mask, const) 作「字面量」:
-同 mask 同 const = 一致;同 mask 异 const = 极性相反(分歧);单侧 = 分歧。
+Three snapshots; for each pool, count the classical distance δ of all segment pairs:
+  ANF pool     : anf_pool(original f)                          -- all ordinary cubes;
+  BDD pool     : graph-stage product (_bdd_entries, with root masks) -- general affine segments;
+  fixed-point pool: fused fixed point of the best FPRM shift   -- mixed routing/synthesis.
+General affine segments use canonical_affine's RREF constraint rows (mask, const) as "literals":
+same mask and same const = agree; same mask but different const = opposite polarity (disagreement); one-sided = disagreement.
 
-指标:
-  δ 分布直方图;δ=2 对中「存在正收益候选」的比例;δ≥3 对的正收益候选命中率;
-  修正版符号预判(正收益 ⇔ 存在极性相反变量,收益 = t(k)−t(k−1))的批量验证
-  (实际增益 vs 公式,统计不符数);
-  不动点池的一次性改进:全局最佳正收益 δ=2/≥3 重写 + 全池重融的 ΣT 增量。
+Metrics:
+  δ distribution histogram; fraction of δ=2 pairs with a positive-gain candidate; positive-gain hit rate for δ≥3 pairs;
+  bulk verification of the revised sign prediction (positive gain ⇔ an opposite-polarity variable exists, gain = t(k)−t(k−1))
+  (actual gain vs formula, count of mismatches);
+  one-shot improvement of the fixed-point pool: global best positive-gain δ=2/≥3 rewrite + full-pool re-fusion ΣT increment.
 """
 import argparse
 import os
@@ -25,10 +25,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from config import config
-from limbdd.CompleteBranch import CompleteBranch, plan_from_affine
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
-from limbdd.fusion.ClosedForm import canonical_affine, fuse_closed
-from limbdd.fusion.GLSearch import fprm_best
+from backend.CompleteBranch import CompleteBranch, plan_from_affine
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.ClosedForm import canonical_affine, fuse_closed
+from backend.fusion.GLSearch import fprm_best
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'exorlink_p6a_probe.txt')
 PROFILE = {5: 60, 6: 40, 7: 20}
@@ -36,9 +36,9 @@ TC = config['t_cost']
 
 
 def rows_of(cb, r, n):
-    """一般仿射段的规范约束行:((mask, const), ...),含根掩码平移(base ^= r)。
+    """Canonical constraint rows of a general affine segment: ((mask, const), ...), including root-mask shift (base ^= r).
 
-    注意:affine_rows() 的行掩码去掉了主元位(主元隐含),须加回 (1 << pivot)。
+    Note: affine_rows() removes the pivot bit from each row mask (the pivot is implicit); it must be added back as (1 << pivot).
     """
     base, basis = canonical_affine(cb, r)
     plan = plan_from_affine(base, basis, n)
@@ -48,9 +48,9 @@ def rows_of(cb, r, n):
 
 def pair_info(ra, rb, n):
     """
-    两段约束行集合的经典距离 δ 与候选 h(全部单行分歧候选)。
-    返回 (δ, agree_rows, opp_indices, oneside_indices)。
-    行集合按 (mask, const) 规范化比较。
+    Classical distance δ between two constraint-row sets and the candidate h list (all single-row disagreement candidates).
+    Returns (δ, agree_rows, opp_indices, oneside_indices).
+    Row sets are compared in canonical (mask, const) form.
     """
     da = dict((m, c) for m, c in ra)
     db = dict((m, c) for m, c in rb)
@@ -73,7 +73,7 @@ def pair_info(ra, rb, n):
 
 
 def h_candidates(agree, opp, oneside_a, oneside_b):
-    """候选 h 的约束行列表:每个分歧变量一行(opp 取两侧各一种)。"""
+    """Constraint row list for a candidate h: one row per diverging variable (opp takes one of each side)."""
     out = []
     for m in opp:
         out.append(agree + [(m, 0)])
@@ -86,7 +86,7 @@ def h_candidates(agree, opp, oneside_a, oneside_b):
 
 
 def cb_from_rows(rows, n):
-    """约束行集合 → CompleteBranch(合成表示)。行须线性无关。"""
+    """Constraint row set → CompleteBranch (synthetic representation). Rows must be linearly independent."""
     pivots = {}
     for m, c in rows:
         mm, cc = m, c
@@ -99,8 +99,8 @@ def cb_from_rows(rows, n):
                 pivots[low] = (mm, cc)
                 break
         if mm == 0 and cc:
-            return None          # 不可满足,非立方
-    # 构造 (base, basis)
+            return None          # unsatisfiable, not a cube
+    # Build (base, basis)
     basis = []
     base = 0
     pivot_cols = {v.bit_length() - 1 for v in pivots}
@@ -119,10 +119,10 @@ def cb_from_rows(rows, n):
 
 
 def move_gain(cb_a, cb_b, rows_h, n):
-    """移动 {A,B} → {A⊕h, B⊕h} 的实际收益;不可融返回 (None, None)。
+    """Actual gain of the move {A,B} → {A⊕h, B⊕h}; returns (None, None) when fusion fails.
 
-    返回 (gain, (kind1, kind2)) 供结构断言:正收益 ⇔ 一侧 kind1(C2)
-    且另一侧 kind3/4(C3/C4 嵌套,代价不变)。
+    Returns (gain, (kind1, kind2)) for structural assertions: positive gain ⇔ one side is kind1 (C2)
+    and the other is kind3/4 (C3/C4 nesting, cost unchanged).
     """
     ch = cb_from_rows(rows_h, n)
     if ch is None:
@@ -136,7 +136,7 @@ def move_gain(cb_a, cb_b, rows_h, n):
 
 
 def analyze_pool(pool, n, label, acc):
-    """pool: [(cb, r)]。统计 δ 分布、δ=2/≥3 正收益命中、符号公式验证。"""
+    """pool: [(cb, r)]. Count δ distribution, positive-gain hits for δ=2/≥3, and symbolic formula verification."""
     m = len(pool)
     hist = Counter()
     pos2 = pos3 = tot2 = tot3 = 0
@@ -172,8 +172,8 @@ def analyze_pool(pool, n, label, acc):
                     gi = next(k for k, (g, _) in enumerate(gains) if g == pos)
                     if best_move is None or pos > best_move[0]:
                         best_move = (pos, i, j, cands[gi])
-            # 符号预判验证(结构版):对每个候选,正收益 ⇔ 一侧 kind1(C2)且另一侧
-            # kind3/4(C3/C4 嵌套,代价不变)。
+            # Symbolic prediction check (structural): for each candidate, positive gain ⇔
+            # one side is kind1 (C2) and the other is kind3/4 (C3/C4 nested, cost unchanged).
             for g, kinds in gains:
                 is_c2 = 1 in kinds
                 is_nest = any(k in (3, 4) for k in kinds)
@@ -190,7 +190,7 @@ def analyze_pool(pool, n, label, acc):
 
 
 def apply_move(pool, best_move, n):
-    """执行一次最佳重写并全池重融;返回 (新不动点成本, 原成本)。"""
+    """Apply one best rewrite and re-fuse the whole pool; return (new fixed-point cost, old cost)."""
     pos, i, j, rows_h = best_move
     ch = cb_from_rows(rows_h, n)
     r1 = fuse_closed(canonical_affine(pool[i][0], pool[i][1]), canonical_affine(ch), n)
@@ -205,7 +205,7 @@ def apply_move(pool, best_move, n):
 
 
 def main():
-    lines = ['P6a 探针:exorlink-δ 机会密度与 δ=2 符号预判批量验证', '']
+    lines = ['P6a probe: exorlink-δ opportunity density and δ=2 symbolic-prediction batch verification', '']
     for n, cases in PROFILE.items():
         data = [int(l.rstrip('\n')) for l in
                 open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
@@ -214,15 +214,15 @@ def main():
         one_step = Counter()
         t0 = time.perf_counter()
         for fn in data:
-            # ANF 池
+            # ANF pool
             pool_anf = [(cb, 0) for cb, _, _ in anf_pool(fn, n)]
             analyze_pool(pool_anf, n, 'anf', acc)
-            # BDD 池
-            from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-            synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+            # BDD pool
+            from backend.OracleSynthesizer import OracleSynthesizer
+            synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
             pool_bdd = [(cb, r) for cb, r, _ in synth._bdd_entries(__import__('utils.TruthTable', fromlist=['TruthTable']).TruthTable(fn, n), None)]
             analyze_pool(pool_bdd, n, 'bdd', acc)
-            # 不动点池
+            # Fixed-point pool
             vF, cF = fprm_best(fn, n)
             kept, st = fuse_pool_global(anf_pool(shift_fn(fn, cF, n), n), n)
             pool_fp = [(cb, r) for cb, r, _ in kept] + [(cb, 0) for cb in st]
@@ -238,19 +238,19 @@ def main():
         h = acc['hist']
         msg = [
             f'====== n = {n}({cases} cases,{wall:.1f}s)======',
-            f'段对总数 {acc["pairs"]};δ 分布: ' +
+            f'total segment pairs {acc["pairs"]}; δ distribution: ' +
             ', '.join(f'δ={k}:{h[k]}({h[k]/max(acc["pairs"],1):.0%})' for k in sorted(h)),
-            f'δ=2: 共 {acc["tot2"]} 对,正收益 {acc["pos2"]} ({acc["pos2"]/max(acc["tot2"],1):.1%})',
-            f'δ≥3: 共 {acc["tot3"]} 对,正收益 {acc["pos3"]} ({acc["pos3"]/max(acc["tot3"],1):.2%})',
-            f'符号预判不符数: {acc["formula_bad"]}',
-            f'不动点一次性改进: 有效 {one_step["nonzero"]}/{one_step["cases"]},'
-            f' Σ 增益 {one_step["gain_sum"]}, 最大 {one_step["gain_max"]}',
+            f'δ=2: {acc["tot2"]} pairs total, positive gain {acc["pos2"]} ({acc["pos2"]/max(acc["tot2"],1):.1%})',
+            f'δ≥3: {acc["tot3"]} pairs total, positive gain {acc["pos3"]} ({acc["pos3"]/max(acc["tot3"],1):.2%})',
+            f'symbolic prediction mismatches: {acc["formula_bad"]}',
+            f'one-shot fixed-point improvement: effective {one_step["nonzero"]}/{one_step["cases"]},'
+            f' Σ gain {one_step["gain_sum"]}, max {one_step["gain_max"]}',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nResults written to {OUT}')
 
 
 if __name__ == '__main__':

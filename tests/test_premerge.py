@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-阶段 1.2(T-3):ANF 差一变量单项式预合并路径的测试。
+Phase 1.2 (T-3): tests for the ANF premerge path for monomials differing in one variable.
 
-恒等式:x^S ⊕ x^{S∪{j}} = x^S·x̄_j(精确)。
-验收口径(见 docs/Optimization_roadmap.md 1.2 节):
-  - 池 XOR 不变量(预合并前/后、融合后);
-  - 每条预合并产物是合法仿射立方;
-  - 端到端 synthesize 逐例验证 + 相比原始 ANF 池的融合 ΣT 统计
-    (逐例不劣由 min(A, C, C′) 结构性保证,这里只做统计观察)。
+Identity: x^S ⊕ x^{S∪{j}} = x^S·x̄_j (exact).
+Acceptance scope (see docs/architecture.md, section 1.2):
+  - pool XOR invariant (before/after premerge and after fusion);
+  - every premerged product is a valid affine cube;
+  - end-to-end synthesize verified case by case + fused ΣT statistics compared with the raw ANF pool
+    (per-case non-worsening is structurally guaranteed by min(A, C, C′); here we only observe statistics).
 """
 from collections import Counter
 from random import randint
 
 from utils.TruthTable import TruthTable
-from limbdd.fusion.BranchFusion import (anf_pool, anf_pool_premerged, fuse_pool_global,
+from backend.fusion.BranchFusion import (anf_pool, anf_pool_premerged, fuse_pool_global,
                                         pool_t_cost)
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from backend.OracleSynthesizer import OracleSynthesizer
 
 
 def random_tt(num_vars):
@@ -40,7 +40,7 @@ def _result_xor(kept, standalone):
 
 
 def test_premerge_invariant(num_vars=6, rounds=200, verbose=False):
-    """预合并池的 XOR 不变量与融合后不变量;池规模统计。"""
+    """XOR invariant of the premerged pool and post-fusion invariant; pool size statistics."""
     print(f'Testing ANF premerge invariant with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -50,18 +50,18 @@ def test_premerge_invariant(num_vars=6, rounds=200, verbose=False):
         raw = anf_pool(tt.bitstr, n)
         pre = anf_pool_premerged(tt.bitstr, n)
 
-        assert _pool_xor(raw, n) == tt.bitstr, '原始 ANF 池 XOR 不变量被破坏'
-        assert _pool_xor(pre, n) == tt.bitstr, f'预合并池 XOR 不变量被破坏: tt={tt.bitstr}'
-        assert len(pre) <= len(raw), '预合并不应增加池规模'
-        # 预合并产物均为无 ft_lims 的走线段:符号表示自检 dim K = n − nctrl
+        assert _pool_xor(raw, n) == tt.bitstr, 'raw ANF pool XOR invariant broken'
+        assert _pool_xor(pre, n) == tt.bitstr, f'premerged pool XOR invariant broken: tt={tt.bitstr}'
+        assert len(pre) <= len(raw), 'premerge must not increase the pool size'
+        # Premerged products are all wire-walk segments without ft_lims: symbolic self-check dim K = n − nctrl
         for cb, _, _ in pre:
             aff = cb.affine()
-            assert len(aff.basis) == n - cb.nctrl(), f'仿射表示维数异常: {cb!r}'
+            assert len(aff.basis) == n - cb.nctrl(), f'affine representation dimension anomaly: {cb!r}'
 
         kept_r, st_r = fuse_pool_global(raw, n)
         kept_p, st_p = fuse_pool_global(pre, n)
-        assert _result_xor(kept_r, st_r) == tt.bitstr, '原始池融合后 XOR 不变量被破坏'
-        assert _result_xor(kept_p, st_p) == tt.bitstr, '预合并池融合后 XOR 不变量被破坏'
+        assert _result_xor(kept_r, st_r) == tt.bitstr, 'raw pool XOR invariant broken after fusion'
+        assert _result_xor(kept_p, st_p) == tt.bitstr, 'premerged pool XOR invariant broken after fusion'
 
         tr, tp = pool_t_cost(kept_r, st_r), pool_t_cost(kept_p, st_p)
         stat['raw_size'] += len(raw)
@@ -72,23 +72,23 @@ def test_premerge_invariant(num_vars=6, rounds=200, verbose=False):
         elif tp > tr: stat['pre_worse'] += 1
         else: stat['pre_same'] += 1
 
-    print(f'  池规模: raw 均值 {stat["raw_size"] / rounds:.1f} → pre 均值 {stat["pre_size"] / rounds:.1f}')
-    print(f'  融合 ΣT: raw={stat["raw_cost"]} pre={stat["pre_cost"]}  '
-          f'(pre 更优 {stat["pre_better"]}, 相同 {stat["pre_same"]}, 更差 {stat["pre_worse"]})')
+    print(f'  pool size: raw mean {stat["raw_size"] / rounds:.1f} → pre mean {stat["pre_size"] / rounds:.1f}')
+    print(f'  fused ΣT: raw={stat["raw_cost"]} pre={stat["pre_cost"]}  '
+          f'(pre better {stat["pre_better"]}, same {stat["pre_same"]}, worse {stat["pre_worse"]})')
     print('Premerge invariant test passed!!!')
     return stat
 
 
 def test_premerge_end_to_end(num_vars=5, rounds=120, verbose=False):
-    """端到端:合成逐例 compute_tt 验证(经 min(A, C, C′) 后端)。"""
+    """End-to-end: synthesis verified case by case via compute_tt (through the min(A, C, C′) backend)."""
     print(f'Testing premerge end-to-end with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
-    synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+    synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
     for _ in range(rounds):
         tt = random_tt(n)
         synth.synthesize(tt)
-        assert synth.circ.verify(tt), f'综合验证失败: tt={tt.bitstr}'
+        assert synth.circ.verify(tt), f'synthesis verification failed: tt={tt.bitstr}'
     print('Premerge end-to-end test passed!!!')
 
 

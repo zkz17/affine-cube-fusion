@@ -3,10 +3,11 @@ from random import randint
 
 from utils.TruthTable import TruthTable
 from utils.Qubit import QubitManager
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.CompleteBranch import (CompleteBranch, abs_lim, extract_complete_branches,
-                                   affine_from_fn, plan_from_affine, is_affine_cube)
-from limbdd.fusion.BranchFusion import shift_fn, fuse_pool_global
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.CompleteBranch import (CompleteBranch, affine_from_fn, plan_from_affine,
+                                   is_affine_cube)
+from limbdd.Extraction import abs_lim, extract_complete_branches
+from backend.fusion.BranchFusion import shift_fn, fuse_pool_global
 from utils.to_qiskit import to_qiskit
 from experiments.phase0_branch_stats import count_t_cost
 from tests.test_complete_branch import prepare_pieces
@@ -17,7 +18,7 @@ def random_tt(num_vars):
 
 
 def collect_entries(tt, reorder):
-    """图阶段后收集 (CompleteBranch, root_mask, piece_key) 全局条目。"""
+    """Collect global entries (CompleteBranch, root_mask, piece_key) after the graph phase."""
     entries = []
     for key, g in enumerate(prepare_pieces(tt, reorder)):
         r = abs_lim(g.root.lim, g.var_order)
@@ -30,11 +31,11 @@ def emit_check(cb, num_vars):
     qm = QubitManager()
     for v in range(num_vars):
         qm.get_input_qubit(v)
-    assert cb.to_circuit(qm).compute_tt() == cb.fn(), f'发射不一致: {cb!r}'
+    assert cb.to_circuit(qm).compute_tt() == cb.fn(), f'emission mismatch: {cb!r}'
 
 
 def test_shift_fusion_contract(num_vars=5, rounds=300, max_pairs=30, verbose=False):
-    """平移融合契约：d' = f_A(x⊕r_A) ⊕ f_B(x⊕r_B) 的判定与构造精确。"""
+    """Shifted fusion contract: the criterion and construction for d' = f_A(x⊕r_A) ⊕ f_B(x⊕r_B) are exact."""
     print(f'Testing shifted fusion contract with {rounds} random {num_vars}-input functions...')
 
     checked = 0
@@ -56,11 +57,11 @@ def test_shift_fusion_contract(num_vars=5, rounds=300, max_pairs=30, verbose=Fal
             if not aff:
                 continue
             if d == 0:
-                continue  # 抵消语义由池测试覆盖
+                continue  # cancellation semantics are covered by the pool tests
             base, basis = affine_from_fn(d, num_vars)
             plan = plan_from_affine(base, basis, num_vars)
             fused = CompleteBranch(num_vars, synthetic=plan)
-            assert fused.fn() == d, f'平移融合契约失败: ra={ra}, rb={rb}'
+            assert fused.fn() == d, f'shifted fusion contract failed: ra={ra}, rb={rb}'
             emit_check(fused, num_vars)
             checked += 1
             if verbose:
@@ -70,7 +71,7 @@ def test_shift_fusion_contract(num_vars=5, rounds=300, max_pairs=30, verbose=Fal
 
 
 def test_global_pool_invariant(num_vars=5, rounds=300, verbose=False):
-    """全局池：有效函数 XOR 不变量、段数单调减、产物可发射。"""
+    """Global pool: XOR invariant of the effective function, monotone decrease in segment count, products emittable."""
     print(f'Testing global pool invariants with {rounds} random {num_vars}-input functions...')
 
     for i in range(rounds):
@@ -89,9 +90,9 @@ def test_global_pool_invariant(num_vars=5, rounds=300, verbose=False):
         for cb in standalone:
             xor_after ^= cb.fn()
 
-        assert xor_after == xor_before, f'全局池 XOR 不变量破坏: tt={tt}'
+        assert xor_after == xor_before, f'global pool XOR invariant broken: tt={tt}'
         assert len(kept) + len(standalone) <= len(entries), \
-            f'段数未单调减: {len(entries)} -> {len(kept) + len(standalone)}'
+            f'segment count did not decrease monotonically: {len(entries)} -> {len(kept) + len(standalone)}'
         for cb in standalone:
             emit_check(cb, num_vars)
         if verbose:
@@ -101,24 +102,24 @@ def test_global_pool_invariant(num_vars=5, rounds=300, verbose=False):
 
 
 def test_global_backend_equivalence(num_vars=5, rounds=300, verbose=False):
-    """新旧后端差分（fused_backend=True = 全局融合路径）。"""
+    """Old/new backend differential (fused_backend=True = global fusion path)."""
     print(f'Testing global fused backend with {rounds} random {num_vars}-input functions...')
 
     t_old_sum, t_new_sum = 0, 0
     for i in range(rounds):
         tt = random_tt(num_vars)
-        old = LimBDDOracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=False)
-        # 注(2025-08-22):多路径组合禁用;验证 A 路径融合后端 ≤ 旧后端
-        # (融合只降不升,旧后端 = 原始池 ΣT)。
-        new = LimBDDOracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=True,
+        old = OracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=False)
+        # Note (2025-08-22): multi-path combinations are disabled; verify that the A-path fused backend ≤ the old backend
+        # (fusion only lowers or keeps T, and the old backend = raw pool ΣT).
+        new = OracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=True,
                                       paths=('A',))
         old.synthesize(tt)
         new.synthesize(tt)
-        assert old.circ.verify(tt), f'旧后端验证失败: {tt}'
-        assert new.circ.verify(tt), f'全局后端验证失败: {tt}'
+        assert old.circ.verify(tt), f'old backend verification failed: {tt}'
+        assert new.circ.verify(tt), f'global backend verification failed: {tt}'
         t_old = count_t_cost(to_qiskit(old.circ))
         t_new = count_t_cost(to_qiskit(new.circ))
-        assert t_new <= t_old, f'全局后端 T 上升: {t_old} -> {t_new} (tt={tt})'
+        assert t_new <= t_old, f'global backend T increased: {t_old} -> {t_new} (tt={tt})'
         t_old_sum += t_old
         t_new_sum += t_new
         if verbose:
@@ -129,20 +130,20 @@ def test_global_backend_equivalence(num_vars=5, rounds=300, verbose=False):
 
 
 def test_global_backend_stats(n4=200, n6=100, n7=30, verbose=False):
-    """n=4/6/7 差分统计样本。"""
+    """n=4/6/7 differential statistics sample."""
     for num_vars, rounds in ((4, n4), (6, n6), (7, n7)):
         t_old_sum, t_new_sum = 0, 0
         rng_tts = [random_tt(num_vars) for _ in range(rounds)]
         for i, tt in enumerate(rng_tts):
-            old = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=False)
-            new = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+            old = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=False)
+            new = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                           paths=('A',))
             old.synthesize(tt)
             new.synthesize(tt)
-            assert old.circ.verify(tt) and new.circ.verify(tt), f'验证失败: {tt}'
+            assert old.circ.verify(tt) and new.circ.verify(tt), f'verification failed: {tt}'
             t_old = count_t_cost(to_qiskit(old.circ))
             t_new = count_t_cost(to_qiskit(new.circ))
-            assert t_new <= t_old, f'全局后端 T 上升: {t_old} -> {t_new} (tt={tt})'
+            assert t_new <= t_old, f'global backend T increased: {t_old} -> {t_new} (tt={tt})'
             t_old_sum += t_old
             t_new_sum += t_new
             if verbose:
@@ -152,19 +153,19 @@ def test_global_backend_stats(n4=200, n6=100, n7=30, verbose=False):
 
 
 def test_anf_pool(num_vars=6, rounds=200, verbose=False):
-    """ANF 分解池：XOR 不变量、融合后池有效且不劣于单项式池。"""
-    from limbdd.fusion.BranchFusion import anf_pool, pool_t_cost
+    """ANF decomposition pool: XOR invariant, post-fusion pool valid and no worse than the monomial pool."""
+    from backend.fusion.BranchFusion import anf_pool, pool_t_cost
 
     print(f'Testing ANF pool with {rounds} random {num_vars}-input functions...')
 
     for i in range(rounds):
         tt = random_tt(num_vars)
         entries = anf_pool(tt.bitstr, num_vars)
-        assert entries, 'ANF 池不应为空'
+        assert entries, 'ANF pool should not be empty'
         xor_before = 0
         for cb, r, _ in entries:
             xor_before ^= cb.fn()
-        assert xor_before == tt.bitstr, f'ANF 池 XOR 不变量破坏: {tt}'
+        assert xor_before == tt.bitstr, f'ANF pool XOR invariant broken: {tt}'
 
         kept, st = fuse_pool_global(entries, num_vars)
         assert pool_t_cost(kept, st) <= sum(cb.t_cost() for cb, _, _ in entries)
@@ -173,7 +174,7 @@ def test_anf_pool(num_vars=6, rounds=200, verbose=False):
             x ^= shift_fn(cb.fn(), r, num_vars)
         for cb in st:
             x ^= cb.fn()
-        assert x == tt.bitstr, f'ANF 池融合破坏 XOR 不变量: {tt}'
+        assert x == tt.bitstr, f'ANF pool fusion broke the XOR invariant: {tt}'
         if verbose:
             print('  ', i, str(tt), f'{len(entries)} -> {len(kept)}+{len(st)}')
 

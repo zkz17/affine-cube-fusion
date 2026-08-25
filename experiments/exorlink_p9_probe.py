@@ -1,23 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-P9 探针:宏 M2 的生产式相间调度验证(五项路径分别量测边际)。
+P9 probe: production-style interleaved scheduling verification of macro M2 (five paths, each measuring its marginal gain).
 
-调度(生产式):pool → fuse_pool_global(极大匹配,到不动点)→ 枚举最佳宏 M2 →
-应用 → 重融,循环;上限 interleave 轮数。对照 V0 = 纯生产融合(无 M2)。
+Scheduling (production-style): pool → fuse_pool_global (maximal matching, to fixed point) → enumerate the best macro M2 →
+apply → re-fuse, loop; bounded by the interleave round limit. Control V0 = pure production fusion (no M2).
 
-五项路径的**融合前**池:
-  A  = BDD 图阶段产物(split 开,absorb 已移除);
-  C  = anf_pool(f)(c=0);
-  F  = anf_pool(f∘τ_cF)(FPRM 最优平移);
-  FP = anf_pool(f∘τ_cFp)(fprm_proxy 最优平移);
-  G  = gl_search 结果池(kept+standalone,池本体为 g=f(Ax⊕c) 的分解)。
+The **pre-fusion** pools of the five paths:
+  A  = BDD graph-stage product (split on, absorb removed);
+  C  = anf_pool(f) (c=0);
+  F  = anf_pool(f∘τ_cF) (FPRM optimal shift);
+  FP = anf_pool(f∘τ_cFp) (fprm_proxy optimal shift);
+  G  = gl_search result pool (kept+standalone; the pool body is the decomposition of g=f(Ax⊕c)).
 
-验证:
-  - 每轮融合/宏应用后断言池 XOR 不变量;
-  - A/C/F/FP 路径的最终池按生产发射管线(平移三明治 + 根三明治 + B-4 重排 +
-    simplify)发射并 compute_tt == f;G 路径的线性 wrapper 属发射层,
-    只验证池 XOR == g(发射层不参与 M2,故 G 只做池级边际)。
-隔离:只读 data/test_cases,只写 experiments/phase0_results/。
+Verification:
+  - after every fusion/macro application, assert the pool XOR invariant;
+  - the final pools of the A/C/F/FP paths are emitted through the production emission pipeline
+    (shift sandwich + root sandwich + B-4 reordering + simplify) and must have compute_tt == f;
+    the G path's linear wrapper belongs to the emission layer, so only the pool XOR == g is checked
+    (the emission layer does not take part in M2, so G only measures pool-level marginals).
+Isolation: read only data/test_cases, write only experiments/phase0_results/.
 """
 import os
 import sys
@@ -30,13 +31,13 @@ sys.path.insert(0, ROOT)
 from config import config
 from utils.Qubit import QubitManager
 from utils.TruthTable import TruthTable
-from limbdd.CompleteBranch import CompleteBranch, _bits, plan_from_affine
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
-from limbdd.fusion.ClosedForm import canonical_affine, fuse_closed
-from limbdd.fusion.FprmProxy import fprm_proxy_best
-from limbdd.fusion.GLSearch import (apply_linear, compose_transvection_right,
+from backend.CompleteBranch import CompleteBranch, _bits, plan_from_affine
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.ClosedForm import canonical_affine, fuse_closed
+from backend.fusion.FprmProxy import fprm_proxy_best
+from backend.fusion.GLSearch import (apply_linear, compose_transvection_right,
                                     fprm_best, gl_search)
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from backend.OracleSynthesizer import OracleSynthesizer
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 import experiments.exorlink_p6a_probe as P6
 
@@ -59,11 +60,12 @@ def pool_xor(pool, n):
 
 def best_m2(pool, n):
     """
-    不动点处的最佳宏 M2(真实总收益 = 对子移动 imm + A′+C 融合收益,严格 > 0)。
+    Best macro M2 at a fixed point (true total gain = pair move imm + A′+C fusion gain, strictly > 0).
 
-    返回 (total, imm, g_fuse, idxA, idxB, k, rA, rB, rc, side) 或 None。
-    注:不动点处 imm ≤ 0(否则 d2 移动早已被采用);Π 中性对即 imm == 0,
-    imm < 0 属「有界恶化 + 融合补偿」推广(总收益仍严格为正)。
+    Returns (total, imm, g_fuse, idxA, idxB, k, rA, rB, rc, side) or None.
+    Note: at a fixed point imm ≤ 0 (otherwise the d2 move would already have been taken);
+    Π-neutral pairs have imm == 0, while imm < 0 is the "bounded worsening + fusion
+    compensation" generalization (total gain is still strictly positive).
     """
     aff = [canonical_affine(cb, r) for cb, r, _ in pool]
     rows = [P6.rows_of(pool[i][0], pool[i][1], n) for i in range(len(pool))]
@@ -103,14 +105,14 @@ def best_m2(pool, n):
 
 
 def interleaved(entries, n, expected_xor):
-    """生产式相间调度:融合到不动点 → 最佳 M2 → 重融,循环。返回 (cost, pool, stats)。"""
+    """Production-style interleaved scheduling: fuse to fixed point → best M2 → re-fuse, loop. Returns (cost, pool, stats)."""
     pool = [(cb, r, key) for cb, r, key in entries]
     stats = Counter()
     rounds = 0
     while rounds < MAX_INTERLEAVE:
         kept, st = fuse_pool_global(pool, n)
         pool = [(cb, r, key) for cb, r, key in kept] + [(cb, 0, None) for cb in st]
-        assert pool_xor(pool, n) == expected_xor, '融合后 XOR 不变量破坏'
+        assert pool_xor(pool, n) == expected_xor, 'pool XOR invariant broken after fusion'
         mv = best_m2(pool, n)
         if mv is None:
             break
@@ -119,7 +121,7 @@ def interleaved(entries, n, expected_xor):
         fused = seg_from(rc, 0, n)
         pool = [e for q, e in enumerate(pool) if q not in (idxA, idxB, k)] + \
                [(b1, pool[idxB][1], pool[idxB][2]), (fused, 0, None)]
-        assert pool_xor(pool, n) == expected_xor, 'M2 后 XOR 不变量破坏'
+        assert pool_xor(pool, n) == expected_xor, 'pool XOR invariant broken after M2'
         stats['m2'] += 1
         stats['m2_gain'] += total
         stats['m2_neutral'] += imm == 0
@@ -128,7 +130,7 @@ def interleaved(entries, n, expected_xor):
 
 
 def emit_and_verify(pool, fn, n, shift_c=0):
-    """按生产发射管线(平移三明治 + 根三明治 + B-4 重排 + simplify)发射并验证。"""
+    """Emit through the production emission pipeline (shift sandwich + root sandwich + B-4 reordering + simplify) and verify."""
     qm = QubitManager()
     for v in range(n):
         qm.get_input_qubit(v)
@@ -151,12 +153,12 @@ def emit_and_verify(pool, fn, n, shift_c=0):
         circ.merge(sc)
     circ.add_lim_operator([qm.get_input_qubit(v) for v in _bits(shift_c)])
     circ.simplify_terms()
-    assert circ.compute_tt() == fn, '发射级 compute_tt 验证失败'
+    assert circ.compute_tt() == fn, 'emission-level compute_tt verification failed'
     return circ
 
 
 def g_of_cnots(fn, shift_c, cnots, n):
-    """由 gl_search 的 cnots(生成顺序)重建 A,返回 g = f(Ax ⊕ c)。"""
+    """Rebuild A from gl_search's cnots (generation order); return g = f(Ax ⊕ c)."""
     A = [1 << i for i in range(n)]
     for c, t in cnots:
         A = compose_transvection_right(A, c, t, n)
@@ -165,9 +167,9 @@ def g_of_cnots(fn, shift_c, cnots, n):
 
 def run_case(fn, n, acc):
     tt = TruthTable(fn, n)
-    synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+    synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
 
-    # ---- 路径准备阶段(计入各自路径的总时间口径)----
+    # ---- Path preparation phase (counted in each path's total-time budget) ----
     t0 = time.perf_counter()
     entries_a = synth._bdd_entries(tt, None)
     acc['A_prep_wall'] += time.perf_counter() - t0
@@ -217,7 +219,7 @@ def run_case(fn, n, acc):
 
 
 def main():
-    lines = ['P9 探针:宏 M2 生产式相间调度(五项路径边际)', '']
+    lines = ['P9 probe: production-style interleaved scheduling of macro M2 (five-path marginals)', '']
     for n, cases in PROFILE.items():
         data = [int(l.rstrip('\n')) for l in
                 open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
@@ -228,26 +230,26 @@ def main():
         msg = [f'====== n = {n}({cases} cases)======']
         for pname in ('A', 'C', 'F', 'FP', 'G'):
             v0, v1 = acc[f'{pname}_V0'], acc[f'{pname}_V1']
-            msg.append(f'{pname:>3} 池: V0={v0}  V1={v1}  ({(v1/v0-1):+.2%},更优 '
-                       f'{acc[f"{pname}_V1_better"]}/{c}, M2 {acc[f"{pname}_m2"]} 次/Σgain '
-                       f'{acc[f"{pname}_m2_gain"]},中性对 '
+            msg.append(f'{pname:>3} pool: V0={v0}  V1={v1}  ({(v1/v0-1):+.2%},better '
+                       f'{acc[f"{pname}_V1_better"]}/{c}, M2 {acc[f"{pname}_m2"]} times/Σgain '
+                       f'{acc[f"{pname}_m2_gain"]},neutral pairs '
                        f'{acc[f"{pname}_m2_neutral"]})')
-        msg.append(f'A/C/F/FP 发射级 compute_tt 验证: {acc["A_emit_ok"]}/{c} 通过')
+        msg.append(f'A/C/F/FP emission-level compute_tt verification: {acc["A_emit_ok"]}/{c} passed')
         for pname in ('A', 'C', 'F', 'FP', 'G'):
             prep = acc[f'{pname}_prep_wall'] / c
             v0 = acc[f'{pname}_V0_wall'] / c
             v1 = acc[f'{pname}_V1_wall'] / c
-            msg.append(f'{pname:>3} 时间(ms/例): prep={prep*1e3:8.2f}  V0融合={v0*1e3:7.2f}  '
-                       f'V1融合+M2={v1*1e3:7.2f}  M2增量={max(v1-v0,0)*1e3:6.2f}')
+            msg.append(f'{pname:>3} time (ms/case): prep={prep*1e3:8.2f}  V0 fusion={v0*1e3:7.2f}  '
+                       f'V1 fusion+M2={v1*1e3:7.2f}  M2 increment={max(v1-v0,0)*1e3:6.2f}')
         fp_m2 = (acc['FP_prep_wall'] + acc['FP_V1_wall']) / c
         f_orig = (acc['F_prep_wall'] + acc['F_V0_wall']) / c
-        msg.append(f'FP+M2 总时间(prep+V1)={fp_m2*1e3:.2f} ms/例  vs  原F(prep+V0)='
-                   f'{f_orig*1e3:.2f} ms/例  ({(fp_m2/f_orig-1):+.1%})')
+        msg.append(f'FP+M2 total time (prep+V1)={fp_m2*1e3:.2f} ms/case  vs  original F (prep+V0)='
+                   f'{f_orig*1e3:.2f} ms/case  ({(fp_m2/f_orig-1):+.1%})')
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nResults written to {OUT}')
 
 
 if __name__ == '__main__':

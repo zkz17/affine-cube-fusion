@@ -55,7 +55,7 @@ class SimpleBranch:
         return f'SimpleBranch({bin(self.bitstr)[2:].zfill(self.bitnum)})'
 
 
-# 向后兼容别名（过渡期：旧 notebook 等仍以 Branch 导入；后续阶段移除）
+# Backward-compatibility alias (transitional: old notebooks etc. still import this as Branch; remove in a later phase)
 Branch = SimpleBranch
 
 
@@ -67,9 +67,9 @@ class LimBDD:
         self.level2nodes = {}    # { LimBDDNode.level : { id(LimBDDNode) : LimBDDNode } }
         self.root = None         # LimBDDSignal
         self.terminator = None   # LimBDDNode
-        # 注意:tt 为 None 时该列表会作为实例属性长期持有,故必须每次新建
-        # (原先的可变默认参数 var_order=[] 会让所有 LimBDD 实例共享同一个列表,
-        #  而 swap_neighbor_levels 对 self.var_order 是**原地**改写)。
+        # Note: when tt is None this list is held long-term as an instance attribute, so it must be created fresh each time
+        # (the previous mutable default var_order=[] made all LimBDD instances share one list,
+        #  and swap_neighbor_levels rewrites self.var_order **in place**).
         self.var_order = [] if var_order is None else var_order # reverse order
         self.split_order = []
         self.node_visited = 0
@@ -614,7 +614,7 @@ class LimBDD:
         min_branch_count = self.branch_count(self.root.node, cache={})
 
         def track(level):
-            """结点数最小（分支数平局）准则。"""
+            """Minimum node count (branch count as tie-breaker) criterion."""
             nonlocal min_node_num, min_level, min_branch_count
             new_branch_count = self.branch_count(self.root.node, cache={})
             if current_node_num < min_node_num:
@@ -989,8 +989,8 @@ class LimBDD:
     def negate(self, start_node, neg_map=None):
         assert(isinstance(start_node, LimBDDNode))
 
-        # neg_map 是递归记忆表(会被写入),必须每次新建:共享默认字典会把上一张图的
-        # LimBDDNode 键与信号带进本次调用,返回指向已销毁子图的 LimBDDSignal。
+        # neg_map is a recursive memo table (it gets written), so it must be created fresh each time: a shared default dict
+        # would carry over the previous graph's LimBDDNode keys and signals into this call, returning a LimBDDSignal pointing into a destroyed subgraph.
         if neg_map is None: neg_map = {}
 
         if start_node in neg_map: return neg_map[start_node].copy()

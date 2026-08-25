@@ -1,26 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-P8 探针:统一交织贪心——δ=1 融合 + δ=2 立即正收益 + 宏 M2(带归还者的承诺重写)。
+P8 probe: unified interleaved greedy -- δ=1 fusion + δ=2 immediate positive gain + macro M2 (committed rewrite with restitution).
 
-宏 M2(用户提议,理论见 Optimization_roadmap.md 或本文件 doc):
-  对 δ=2 的非可融/非正收益对 (A,B),取候选 h(A⊕h、B⊕h 均为立方,重写 T-中性),
-  若存在第三段 C 使 gain(A′, C) > 0(A′ = A⊕h),则整体宏
-  {A,B,C} → {B′, A′⊕C} 的 ΣT 严格下降(宏收益 = gain(A′, C)),且**当场归还**:
-  不引入未承诺的中性状态(对比 P7 beam 的漂移缺陷)。B 侧对称。
+Macro M2 (user proposal; theory in Optimization_roadmap.md or this file's doc):
+  For a δ=2 non-fusible/non-positive pair (A,B), take a candidate h (A⊕h and B⊕h are both cubes, a T-neutral rewrite).
+  If there is a third segment C such that gain(A′, C) > 0 (A′ = A⊕h), then the whole macro
+  {A,B,C} → {B′, A′⊕C} strictly decreases ΣT (macro gain = gain(A′, C)), and it **restitutes on the spot**:
+  it does not introduce an uncommitted neutral state (unlike the P7 beam drift defect). B side is symmetric.
 
-变体(同一单步贪心骨架,仅移动类不同):
-  V1 = 仅 δ=1 融合;
-  V2 = V1 + δ=2 立即正收益重写;
-  V3 = V2 + 宏 M2(完整)。
-对照参考:生产 fuse_pool_global(极大匹配贪心)。
+Variants (same single-step greedy skeleton, only the move class differs):
+  V1 = δ=1 fusion only;
+  V2 = V1 + δ=2 immediate positive-gain rewrite;
+  V3 = V2 + macro M2 (complete).
+Reference: production fuse_pool_global (maximal-matching greedy).
 
-四个池(每用例):ANF 原始 / BDD 原始(split 后)/ **BDD 去 split** / FPRM 最优。
-关键指标:BDD 去 split 池上 V3 相对 V1 的回收率
+Four pools (per test case): ANF original / BDD original (after split) / **BDD de-split** / FPRM optimal.
+Key metric: on the BDD de-split pool, V3's recovery rate relative to V1
   recovery = [V1(ds) − V3(ds)] / [V1(ds) − V1(so)]
-(split 增益 = V1(ds) − V1(so);≥30% 为进入生产化讨论的阈值)。
+(split gain = V1(ds) − V1(so); ≥30% is the threshold for entering the production discussion).
 
-隔离声明:只读 data/test_cases,只写 experiments/phase0_results/;
-不修改生产代码,不影响 data/our_cost/ 下运行中的其它实验。
+Isolation statement: read only data/test_cases, write only experiments/phase0_results/;
+do not modify production code, and do not affect other running experiments under data/our_cost/.
 """
 import os
 import sys
@@ -32,10 +32,10 @@ sys.path.insert(0, ROOT)
 
 from config import config
 from utils.TruthTable import TruthTable
-from limbdd.CompleteBranch import CompleteBranch, plan_from_affine
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
-from limbdd.fusion.ClosedForm import canonical_affine, fuse_closed
-from limbdd.fusion.GLSearch import fprm_best
+from backend.CompleteBranch import CompleteBranch, plan_from_affine
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.ClosedForm import canonical_affine, fuse_closed
+from backend.fusion.GLSearch import fprm_best
 import experiments.exorlink_p6a_probe as P6
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'exorlink_p8_probe.txt')
@@ -44,12 +44,12 @@ PROFILE = {5: 20, 6: 12, 7: 4}
 
 
 def seg_from(res, root, n):
-    """闭式结果 → 分支段(保持根掩码 root 的平移口径)。"""
+    """Closed-form result → branch segment (keeping the root-mask translation convention of root)."""
     return CompleteBranch(n, synthetic=plan_from_affine(res.base ^ root, res.basis, n))
 
 
 def pool_xor(pool, n):
-    """池 XOR 不变量(有效函数空间:kept 段按根掩码平移)。"""
+    """Pool XOR invariant (valid function space: kept segments shifted by root mask)."""
     x = 0
     for cb, r, _ in pool:
         x ^= shift_fn(cb.fn(), r, n)
@@ -58,12 +58,12 @@ def pool_xor(pool, n):
 
 def unified_engine(entries, n, allow_d2, allow_m2, max_rounds=None):
     """
-    单步全局最大下降贪心。返回 (cost, stats)。
-    移动类:
-      d1 : 抵消 / 正收益融合;
-      d2 : δ=2 双侧重写(立即正收益);
-      m2 : 宏 M2(∃C: gain(A′,C) > 0,宏收益 = 该融合收益)。
-    全程校验池 XOR 不变量(每轮)。
+    Single-step global maximum-descent greedy. Returns (cost, stats).
+    Move classes:
+      d1 : cancellation / positive-gain fusion;
+      d2 : δ=2 two-sided rewrite (immediate positive gain);
+      m2 : macro M2 (∃C: gain(A′,C) > 0, macro gain = that fusion gain).
+    The pool XOR invariant is checked throughout (every round).
     """
     pool = [(cb, r, key) for cb, r, key in entries]
     expected_xor = pool_xor(pool, n)
@@ -89,7 +89,7 @@ def unified_engine(entries, n, allow_d2, allow_m2, max_rounds=None):
                 if gain > 0 and (best is None or gain > best[0]):
                     best = (gain, 'd1', (i, j, res))
 
-        # ---- d2 / m2(只扫 δ=2 对)----
+        # ---- d2 / m2 (only scan δ=2 pairs) ----
         if allow_d2 or allow_m2:
             rows = [P6.rows_of(pool[i][0], pool[i][1], n) for i in range(m)]
             for i in range(m):
@@ -121,8 +121,8 @@ def unified_engine(entries, n, allow_d2, allow_m2, max_rounds=None):
                                     rc = fuse_closed(affA, aff[k], n)
                                     if not rc.ok or rc.cancel:
                                         continue
-                                    # 真实总收益 = 对子移动 imm + A′+C 融合收益
-                                    # (不动点处 imm ≤ 0;修复:此前只计融合项,低估成本)
+                                    # True total gain = pair move imm + A′+C fusion gain
+                                    # (at a fixed point imm ≤ 0; fix: previously only the fusion term was counted, underestimating cost)
                                     total = imm + tA + pool[k][0].t_cost() - TC(n - rc.dim)
                                     if total > 0 and (best is None or total > best[0]):
                                         best = (total, 'm2',
@@ -156,18 +156,18 @@ def unified_engine(entries, n, allow_d2, allow_m2, max_rounds=None):
             cost -= gain
         stats[kind] += 1
         stats[f'{kind}_gain'] += gain
-        assert pool_xor(pool, n) == expected_xor, f'{kind} 移动破坏池 XOR 不变量'
+        assert pool_xor(pool, n) == expected_xor, f'{kind} move broke pool XOR invariant'
     return cost, stats
 
 
 def bdd_pool(tt, patterns):
     from limbdd.LimBDDManager import LimBDDManager
-    from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+    from backend.OracleSynthesizer import OracleSynthesizer
     orig = LimBDDManager.split_with_pattern
     if not patterns:
         LimBDDManager.split_with_pattern = lambda self, limbdd, pattern: None
     try:
-        synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+        synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
         return synth._bdd_entries(tt, None)
     finally:
         LimBDDManager.split_with_pattern = orig
@@ -201,7 +201,7 @@ def run_case(fn, n, acc):
 
 
 def main():
-    lines = ['P8 探针:统一交织贪心(δ=1 / δ=2 / 宏 M2)', '']
+    lines = ['P8 probe: unified interleaved greedy (δ=1 / δ=2 / macro M2)', '']
     for n, cases in PROFILE.items():
         data = [int(l.rstrip('\n')) for l in
                 open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
@@ -212,25 +212,25 @@ def main():
         msg = [f'====== n = {n}({cases} cases)======']
         for pname in ('anf', 'bdd', 'bdd_ds', 'frm'):
             v1, v2, v3 = acc[f'{pname}_V1'], acc[f'{pname}_V2'], acc[f'{pname}_V3']
-            msg.append(f'{pname:>7} 池: ref(生产)={acc[f"{pname}_ref"]}  '
+            msg.append(f'{pname:>7} pool: ref(production)={acc[f"{pname}_ref"]}  '
                        f'V1={v1}  V2={v2}  V3={v3}')
-            msg.append(f'          相对 V1: V2 {(v2/v1-1):+.2%}(更优 {acc[f"{pname}_V2_better"]}/{c})  '
-                       f'V3 {(v3/v1-1):+.2%}(更优 {acc[f"{pname}_V3_better"]}/{c})')
+            msg.append(f'          relative to V1: V2 {(v2/v1-1):+.2%}(better {acc[f"{pname}_V2_better"]}/{c})  '
+                       f'V3 {(v3/v1-1):+.2%}(better {acc[f"{pname}_V3_better"]}/{c})')
             if acc[f'{pname}_V3_m2']:
-                msg.append(f'          M2 接受 {acc[f"{pname}_V3_m2"]} 次(均增益 '
+                msg.append(f'          M2 accepted {acc[f"{pname}_V3_m2"]} times (avg gain '
                            f'{acc[f"{pname}_V3_m2_gain"]/max(acc[f"{pname}_V3_m2"],1):.1f}),'
-                           f' d2 接受 {acc[f"{pname}_V3_d2"]} 次')
-        # 回收率:BDD 去 split 池上 V3 vs V1,分母 = split 增益
+                           f' d2 accepted {acc[f"{pname}_V3_d2"]} times')
+        # Recovery rate: V3 vs V1 on the BDD de-split pool; denominator = split gain
         v1so, v1ds, v3ds = acc['bdd_V1'], acc['bdd_ds_V1'], acc['bdd_ds_V3']
         denom = v1ds - v1so
         rec = (v1ds - v3ds) / denom if denom > 0 else float('nan')
-        msg.append(f'split 增益(V1)={denom},V3 在去 split 池上的额外收益={v1ds - v3ds},'
-                   f'回收率={rec:.1%}')
+        msg.append(f'split gain (V1)={denom},V3 extra gain on the de-split pool={v1ds - v3ds},'
+                   f'recovery rate={rec:.1%}')
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nResults written to {OUT}')
 
 
 if __name__ == '__main__':

@@ -20,8 +20,8 @@ class SplitPattern(ABC):
     def copy_nodes_between(source, targets, split_limbdd, termination_constructor, level_drop=0, copy_map=None):
         assert(isinstance(source, LimBDDSignal) and isinstance(targets, list) and isinstance(split_limbdd, LimBDD))
 
-        # copy_map 是本次拷贝的记忆表(会被写入),必须每次新建:共享默认字典会把上一次
-        # 图重写的 node.idx → 拷贝信号带进本次调用,导致跨图错误复用结点。
+        # copy_map is the memo table for this copy (it gets written), so it must be created fresh each time: a shared default dict
+        # would carry over the previous graph rewrite's node.idx -> copied signal into this call, causing wrong node reuse across graphs.
         if copy_map is None: copy_map = {}
 
         if not len(targets): return

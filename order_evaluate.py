@@ -1,7 +1,7 @@
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
 from config import config
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from backend.OracleSynthesizer import OracleSynthesizer
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 
@@ -30,8 +30,8 @@ def evaluate_order(num_var=3):
     with open(f'data/test_cases/test_cases_{num_var}', 'r') as f:
         lines = f.readlines()
 
-    synthesizer_reorder = LimBDDOracleSynthesizer(reorder=True)
-    synthesizer_noorder = LimBDDOracleSynthesizer(reorder=False)
+    synthesizer_reorder = OracleSynthesizer(reorder=True)
+    synthesizer_noorder = OracleSynthesizer(reorder=False)
     better, worse, eqv = 0, 0, 0
     worse_cases = []
     for counter in range(len(lines)):

@@ -1,40 +1,45 @@
 # -*- coding: utf-8 -*-
 """
-宏 M2 生产实现(P9 定稿形态,2025-08-22)。
+Macro M2 production implementation (P9-finalized form, 2025-08-22).
 
-理论:docs/macro_m2_theory.md §2-3。对 δ=2 对 (A,B) 与候选 h(经典 exorlink
-分歧字面量族,P6a 机制),先做双侧重写 {A,B} → {A⊕h, B⊕h}(对子移动 imm,
-不动点处必 ≤ 0,否则 δ=2 立即型早已被采用),再挑第三段 C 与 A′ 融合
-(g_fuse > 0 且总收益 imm + g_fuse > 0),应用:
+Theory: docs/macro_m2_theory.md §2-3. For a δ=2 pair (A,B) and a candidate h (the classical
+exorlink divergent-literal family, P6a mechanism), first apply the two-sided rewrite
+{A,B} → {A⊕h, B⊕h} (pair move imm, at a fixed point necessarily ≤ 0, otherwise the δ=2
+immediate move would already have been taken), then pick a third segment C to fuse with A′
+(g_fuse > 0 and total gain imm + g_fuse > 0), applying:
 
     {A, B, C} → { B⊕h, (A⊕h)⊕C }
 
-B 侧对称孪生一并枚举。宏严格下降(XOR 不变量由 h⊕h=0 保证)⇒ 逐例 T 零回归;
-时间成本 n≤7 实测 0.1~2.9 ms/例(P9),生产接入带开关(默认关闭)。
+The B-side symmetric twin is enumerated as well. The macro strictly decreases
+(XOR invariance is guaranteed by h⊕h=0), so per-case T never regresses; measured time cost
+0.1~2.9 ms/case at n≤7 (P9); the production integration is behind a switch (default on).
 
-生产化要点:
-  - C 预筛:gain(A′,C)>0 的必要条件是双方 dim(K) 差 ≤1(理论文档推广 #6),
-    按 dim 分桶把 C 扫描从 O(m) 降为桶内;`m2_best_move(pool, n, prescreen=…)`
-    可用全扫描对照(tests/test_macro_m2.py 做差分验证);
-  - 轮次上限 max_rounds(默认 30,与 P9 探针口径一致);
-  - XOR 不变量断言仅在 LIMBDD_FUSION_DEBUG=1 下执行(O(m·2^n),n≥8 生产关闭)。
+Production notes:
+  - C prescreen: a necessary condition for gain(A′,C)>0 is dim(K) differing by ≤1
+    (theory doc generalization #6); dim bucketing reduces the C scan from O(m) to per-bucket;
+    `m2_best_move(pool, n, prescreen=…)` can be checked against a full scan
+    (tests/test_macro_m2.py does the differential verification);
+  - round cap max_rounds (default 30, same as the P9 probe);
+  - the XOR-invariant assertion runs only under LIMBDD_FUSION_DEBUG=1 (O(m·2^n), off in
+    production for n≥8).
 """
 from collections import defaultdict
 
-from limbdd.CompleteBranch import CompleteBranch, plan_from_affine
-from limbdd.fusion.BranchFusion import fuse_pool_global, shift_fn, FUSION_DEBUG
-from limbdd.fusion.ClosedForm import canonical_affine, fuse_closed
+from backend.CompleteBranch import CompleteBranch, plan_from_affine
+from backend.fusion.BranchFusion import fuse_pool_global, shift_fn, FUSION_DEBUG
+from backend.fusion.ClosedForm import canonical_affine, fuse_closed
 from config import config
 
 TC = config['t_cost']
 
 
-# ------------------------------------------------------------- P6a 机制移植 ----
+# ------------------------------------------------------------- P6a mechanics port ----
 
 def rows_of(cb, r, n):
-    """一般仿射段的规范约束行:((mask, const), ...),含根掩码平移(base ^= r)。
+    """Canonical constraint rows of a general affine segment: ((mask, const), ...), with the
+    root-mask shift baked in (base ^= r).
 
-    affine_rows() 的行掩码去掉了主元位(主元隐含),须加回 (1 << pivot)。
+    affine_rows() strips the pivot bit from row masks (the pivot is implicit); add back (1 << pivot).
     """
     base, basis = canonical_affine(cb, r)
     plan = plan_from_affine(base, basis, n)
@@ -43,7 +48,8 @@ def rows_of(cb, r, n):
 
 
 def pair_info(ra, rb, n):
-    """两段约束行集合的经典距离 δ 与候选 h 原料(全部单行分歧候选)。"""
+    """Classical distance δ between two constraint-row sets and the raw material for candidate h
+    (all single-row divergent candidates)."""
     da = dict((m, c) for m, c in ra)
     db = dict((m, c) for m, c in rb)
     agree, opp, oneside_a, oneside_b = [], [], [], []
@@ -62,7 +68,7 @@ def pair_info(ra, rb, n):
 
 
 def h_candidates(agree, opp, oneside_a, oneside_b):
-    """候选 h 的约束行列表:每个分歧变量一行(opp 取两侧各一种)。"""
+    """Constraint-row lists of candidate h: one row per divergent variable (opp takes one from each side)."""
     out = []
     for m in opp:
         out.append(agree + [(m, 0)])
@@ -75,7 +81,7 @@ def h_candidates(agree, opp, oneside_a, oneside_b):
 
 
 def cb_from_rows(rows, n):
-    """约束行集合 → CompleteBranch(合成表示)。行须线性无关。"""
+    """Constraint-row set → CompleteBranch (synthetic representation). Rows must be linearly independent."""
     pivots = {}
     for m, c in rows:
         mm, cc = m, c
@@ -88,7 +94,7 @@ def cb_from_rows(rows, n):
                 pivots[low] = (mm, cc)
                 break
         if mm == 0 and cc:
-            return None          # 不可满足,非立方
+            return None          # unsatisfiable, not a cube
     basis, base = [], 0
     pivot_cols = {v.bit_length() - 1 for v in pivots}
     for f in range(n):
@@ -105,7 +111,7 @@ def cb_from_rows(rows, n):
     return CompleteBranch(n, synthetic=plan_from_affine(base, basis, n))
 
 
-# ------------------------------------------------------------- 宏 M2 ---------
+# ------------------------------------------------------------- macro M2 ---------
 
 def seg_from(res, root, n):
     return CompleteBranch(n, synthetic=plan_from_affine(res.base ^ root, res.basis, n))
@@ -120,13 +126,14 @@ def _pool_xor(pool, n):
 
 def m2_best_move(pool, n, prescreen=True):
     """
-    不动点池上的最佳宏 M2。返回 (total, idxA, idxB, k, rA, rB, rc) 或 None。
+    Best macro M2 on a fixed-point pool. Returns (total, idxA, idxB, k, rA, rB, rc) or None.
 
-    total = imm + g_fuse > 0 为真实总收益:
-      imm     = t(A)+t(B) − t(A⊕h) − t(B⊕h)(对子移动,不动点处 ≤ 0);
-      g_fuse  = t(A⊕h)+t(C) − t((A⊕h)⊕C)(A′+C 融合收益)。
-    prescreen=True 时 C 只扫 dim(K) 与 rA.dim 差 ≤1 的桶(理论推广 #6);
-    差分正确性由 tests/test_macro_m2.py 全扫描对照验证。
+    total = imm + g_fuse > 0 is the true total gain:
+      imm     = t(A)+t(B) − t(A⊕h) − t(B⊕h)   (pair move; ≤ 0 at a fixed point);
+      g_fuse  = t(A⊕h)+t(C) − t((A⊕h)⊕C)     (A′+C fusion gain).
+    With prescreen=True, C is only scanned in the buckets whose dim(K) differs from rA.dim by ≤1
+    (theory generalization #6); differential correctness is verified against a full scan by
+    tests/test_macro_m2.py.
     """
     aff = [canonical_affine(cb, r) for cb, r, _ in pool]
     dims = [len(basis) for _, basis in aff]
@@ -181,11 +188,13 @@ def m2_best_move(pool, n, prescreen=True):
 
 def m2_interleaved(kept, standalone, n, max_rounds=30):
     """
-    宏 M2 相间调度(生产式,P9 口径):池须已融合到不动点。
+    Macro M2 interleaved schedule (production form, P9 convention): the pool must already be fused
+    to a fixed point.
 
-    循环:最佳宏 M2 → 应用 → fuse_pool_global 重融,至多 max_rounds 次;
-    返回 (kept, standalone),结构与 fuse_pool_global 相同(发射归组语义不变)。
-    每步严格下降 ⇒ 逐例 T 零回归;LIMBDD_FUSION_DEBUG=1 时逐轮断言 XOR 不变量。
+    Loop: best macro M2 → apply → fuse_pool_global re-fusion, at most max_rounds iterations;
+    returns (kept, standalone) with the same structure as fuse_pool_global (emission grouping
+    semantics unchanged). Every step strictly decreases, so per-case T never regresses; under
+    LIMBDD_FUSION_DEBUG=1 the XOR invariant is asserted every round.
     """
     pool = [(cb, r, key) for cb, r, key in kept] + [(cb, 0, None) for cb in standalone]
     if FUSION_DEBUG:
@@ -200,11 +209,11 @@ def m2_interleaved(kept, standalone, n, max_rounds=30):
         pool = [e for q, e in enumerate(pool) if q not in (idxA, idxB, k)] + \
                [(b1, pool[idxB][1], pool[idxB][2]), (fused, 0, None)]
         if FUSION_DEBUG:
-            assert _pool_xor(pool, n) == expected_xor, 'M2 移动破坏池 XOR 不变量'
+            assert _pool_xor(pool, n) == expected_xor, 'M2 move broke the pool XOR invariant'
         kept2, st2 = fuse_pool_global(pool, n)
         pool = [(cb, r, key) for cb, r, key in kept2] + [(cb, 0, None) for cb in st2]
         if FUSION_DEBUG:
-            assert _pool_xor(pool, n) == expected_xor, 'M2 后重融破坏池 XOR 不变量'
+            assert _pool_xor(pool, n) == expected_xor, 'post-M2 re-fusion broke the pool XOR invariant'
     kept = [(cb, r, key) for cb, r, key in pool if key is not None]
     standalone = [cb for cb, r, key in pool if key is None]
     return kept, standalone

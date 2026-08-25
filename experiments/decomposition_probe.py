@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-分解路径探针（Q1 量测）：对比三种"真值表 → 分支池"的分解启发式。
+Decomposition-path probe (Q1 measurement): compare three "truth table → branch pool" decomposition heuristics.
 
-  A. BDD + reorder(sifting) + 融合   —— 当前默认后端（代数文档外的主管线）；
-  B. BDD（仅初始序，无 reorder）+ 融合 —— 移除 reorder；
-  C. ANF 分解 + 融合（纯代数，无图阶段）—— ANF 单项式即仿射立方，直接建池融合。
+  A. BDD + reorder(sifting) + fusion   —— current default backend (the main pipeline outside the algebra document);
+  B. BDD (initial order only, no reorder) + fusion —— remove reorder;
+  C. ANF decomposition + fusion (pure algebra, no graph stage) —— ANF monomials are affine cubes, pool built directly for fusion.
 
-指标：融合后池 ΣT、每例耗时、池规模。样本来自 data/test_cases/test_cases_{n}。
-输出：experiments/phase0_results/decomposition_probe_{n}.txt
+Metrics: post-fusion pool ΣT, per-case runtime, pool size. Samples come from data/test_cases/test_cases_{n}.
+Output: experiments/phase0_results/decomposition_probe_{n}.txt
 """
 import argparse
 import os
@@ -15,20 +15,21 @@ import random
 import sys
 import time
 
-# 项目根目录（脚本位于 experiments/ 下，故上溯一级）；加入 sys.path 保证 limbdd/utils 可导入
+# Project root (the script lives under experiments/, so go up one level); add to sys.path so limbdd/utils can be imported
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 EXPERIMENTS = os.path.join(ROOT, 'experiments')
 
 from utils.TruthTable import TruthTable
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.CompleteBranch import CompleteBranch, abs_lim, extract_complete_branches
-from limbdd.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.CompleteBranch import CompleteBranch
+from limbdd.Extraction import abs_lim, extract_complete_branches
+from backend.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool
 
 
 def anf_of(f, n):
-    """快速 Möbius 变换：真值表 → ANF 系数表（int，bit m = 单项式系数）。"""
+    """Fast Möbius transform: truth table → ANF coefficient table (int, bit m = monomial coefficient)."""
     a = f
     size = 1 << n
     for j in range(n):
@@ -42,8 +43,8 @@ def anf_of(f, n):
 
 
 def bdd_pool(tt, reorder):
-    """BDD 图阶段（reorder 可关）→ 全局条目。"""
-    syn = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True)
+    """BDD graph stage (reorder can be disabled) → global entries."""
+    syn = OracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True)
     syn.construct(tt)
     pieces = syn._collect_pieces_fused()
     n = tt.num_var
@@ -71,7 +72,7 @@ def main():
             lines = f.readlines()
         cases = [int(l.rstrip('\n')) for l in rng.sample(lines, min(count, len(lines)))]
         stats = {'A': [0, 0.0, 0], 'B': [0, 0.0, 0], 'C': [0, 0.0, 0]}  # [ΣT, Σtime, Σpool]
-        out_lines = [f'# 分解路径探针 n={n} cases={len(cases)}']
+        out_lines = [f'# decomposition path probe n={n} cases={len(cases)}']
         for ci, tt in enumerate(cases):
             ttobj = TruthTable(tt, n)
             for key in ('A', 'B', 'C'):
@@ -84,7 +85,7 @@ def main():
                     x = 0
                     for cb, _, _ in entries:
                         x ^= cb.fn()
-                    assert x == ttobj.bitstr, 'ANF 池 XOR 不变量破坏'
+                    assert x == ttobj.bitstr, 'ANF pool XOR invariant violated'
                 kept, st = fuse_pool_global(entries, nn)
                 t = pool_t_cost(kept, st)
                 dt = time.perf_counter() - t0
@@ -93,17 +94,17 @@ def main():
                 stats[key][2] += len(entries)
             out_lines.append(f'{ci} {tt} A={stats["A"][0]}(p{stats["A"][2]}) '
                              f'B={stats["B"][0]}(p{stats["B"][2]}) C={stats["C"][0]}(p{stats["C"][2]})')
-        summary = [f'# n={n} 汇总:']
-        for key, name in (('A', 'BDD+reorder+融合(当前)'), ('B', 'BDD无reorder+融合'), ('C', 'ANF+融合(纯代数)')):
-            summary.append(f'  {name}: ΣT {stats[key][0]}，耗时 {stats[key][1]:.2f}s，'
-                           f'初始池规模均值 {stats[key][2]/len(cases):.0f}')
+        summary = [f'# n={n} summary:']
+        for key, name in (('A', 'BDD+reorder+fusion (current)'), ('B', 'BDD no-reorder+fusion'), ('C', 'ANF+fusion (pure algebra)')):
+            summary.append(f'  {name}: ΣT {stats[key][0]}, time {stats[key][1]:.2f}s, '
+                           f'avg initial pool size {stats[key][2]/len(cases):.0f}')
         summary.append(f'  B vs A: {1 - stats["B"][0]/max(1,stats["A"][0]):+.1%}；'
                        f'C vs A: {1 - stats["C"][0]/max(1,stats["A"][0]):+.1%}')
         print('\n'.join(summary))
         out = os.path.join(EXPERIMENTS, 'phase0_results', f'decomposition_probe_{n}.txt')
         with open(out, 'w') as f:
             f.write('\n'.join(out_lines + summary) + '\n')
-        print(f'[已写入 {out}]')
+        print(f'[written to {out}]')
 
 
 if __name__ == '__main__':

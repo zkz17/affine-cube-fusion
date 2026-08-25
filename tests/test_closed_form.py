@@ -1,31 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-阶段 0.1:闭式判定/构造 vs fn 判定/构造的全量一致性交叉验证。
+Phase 0.1: full consistency cross-validation of the closed-form criterion/construction vs the fn criterion/construction.
 
-被验证对象:`limbdd/fusion/ClosedForm.py`(闭式,O(n^2))
-参照基准  :`limbdd/fusion/BranchFusion.py` + `limbdd/CompleteBranch.py` 的 fn 路径(O(2^n))
+Object under test: `backend/fusion/ClosedForm.py` (closed form, O(n^2))
+Reference baseline: the fn path (O(2^n)) of `backend/fusion/BranchFusion.py` + `limbdd/CompleteBranch.py`
 
-这是 Optimization_roadmap.md 阶段 1.1(T-1 切换)的**验收前提**:必须先在 n=4..7 上
-确认零分歧,才允许把生产路径切到闭式。
+This is the **acceptance precondition** for Phase 1.1 (T-1 switch) in docs/architecture.md:
+zero divergence must first be confirmed on n=4..7 before the production path may be switched to the closed form.
 
-核心等价判据
-------------
-`plan_from_affine(base, basis, n)` 只依赖仿射**集合**,与代表元/基的选择无关:
-  - `rref` 对给定子空间唯一 ⇒ 主元/自由列划分唯一;
-  - 若 e' = e ⊕ v (v ∈ K),则自由列常数 c_f 不变
-    (因 v 满足齐次约束 v_f ⊕ Σ_p (r_p)_f v_p = 0)。
-因此「两条路径给出同一个 SyntheticPlan」⟺「两条路径给出同一个仿射集合」,
-可以直接用 `==` 做最强断言,无需逐一比对 (base, basis) 表示。
+Core equivalence criterion
+--------------------------
+`plan_from_affine(base, basis, n)` depends only on the affine **set**, not on the choice of representative/basis:
+  - `rref` is unique for a given subspace ⇒ the pivot/free column partition is unique;
+  - if e' = e ⊕ v (v ∈ K), then the free-column constants c_f are unchanged
+    (because v satisfies the homogeneous constraints v_f ⊕ Σ_p (r_p)_f v_p = 0).
+Therefore "both paths give the same SyntheticPlan" ⟺ "both paths give the same affine set",
+so we can use `==` as the strongest assertion without comparing the (base, basis) representations one by one.
 """
 from collections import Counter
 from random import Random, randint
 
 from utils.TruthTable import TruthTable
-from limbdd.CompleteBranch import (CompleteBranch, abs_lim, affine_from_fn,
-                                   extract_complete_branches, in_span, is_affine_cube,
+from backend.CompleteBranch import (CompleteBranch, affine_from_fn, in_span, is_affine_cube,
                                    plan_from_affine, reduce_basis, t_cost)
-from limbdd.fusion.BranchFusion import anf_pool, four_case_kind, shift_fn
-from limbdd.fusion.ClosedForm import (_build_joint, _subspace_leq, canonical_affine,
+from limbdd.Extraction import abs_lim, extract_complete_branches
+from backend.fusion.BranchFusion import anf_pool, four_case_kind, shift_fn
+from backend.fusion.ClosedForm import (_build_joint, _subspace_leq, canonical_affine,
                                       closed_gain, fuse_closed)
 from tests.test_complete_branch import prepare_pieces
 
@@ -35,7 +35,7 @@ def random_tt(num_vars):
 
 
 def bdd_entries(tt, reorder):
-    """BDD 图阶段后的全局条目 (cb, root_mask, key);非零 root_mask 用于检验平移闭式。"""
+    """Global entries after the BDD graph phase (cb, root_mask, key); nonzero root_mask exercises the shifted closed form."""
     entries = []
     for key, g in enumerate(prepare_pieces(tt, reorder)):
         r = abs_lim(g.root.lim, g.var_order)
@@ -45,7 +45,7 @@ def bdd_entries(tt, reorder):
 
 
 def _pairs(count, max_pairs):
-    """全部对;超过上限时**均匀抽样**(直接截断会只覆盖 (0, j),偏置严重)。"""
+    """All pairs; when over the limit, **sample uniformly** (plain truncation would only cover (0, j), a severe bias)."""
     out = [(i, j) for i in range(count) for j in range(i + 1, count)]
     if len(out) <= max_pairs:
         return out
@@ -54,26 +54,27 @@ def _pairs(count, max_pairs):
 
 
 def _pools(tt, i):
-    """交替产出 BDD 池(带根掩码)与 ANF 池(根掩码恒 0),两类都要覆盖。"""
+    """Alternate between a BDD pool (with root masks) and an ANF pool (root mask always 0); both kinds must be covered."""
     yield bdd_entries(tt, reorder=(i % 2 == 1))
     yield anf_pool(tt.bitstr, tt.num_var)
 
 
-# kind3 与 kind4 严格互镜(C3 及其对称情形);kind1/kind2 自镜。
+# kind3 and kind4 are strict mirrors (C3 and its symmetric case); kind1/kind2 are self-mirrors.
 #
-# **为什么必须按正反两序各判一次**:C3/C4 要求两段方向子空间嵌套且余维 1,而池中条目的
-# 排列顺序与维数是**系统性相关**的,单一取向会让某一侧永不出现——加大样本量无效。
-#   ANF 池:x^S 的方向子空间为 span{e_j : j∉S},嵌套要求 T ⊊ S 且 |S|=|T|+1;
-#           位掩码上 T ⊂ S 必然 T < S,而条目按掩码升序排列,故固定 a<b 时恒有
-#           mask_a ⊂ mask_b,即 dim K_A = dim K_B + 1 ⇒ **恒为 kind4,kind3 永不出现**。
-#   BDD 池:实测同样偏置(正序恒 kind4、反序恒 kind3,kind1/kind2/None 计数不变)。
+# **Why both orders must each be checked once**: C3/C4 require the two segments' direction subspaces to be nested
+# with codimension 1, and the ordering of pool entries is **systematically correlated** with their dimensions,
+# so a single orientation would make one side never appear — increasing the sample size does not help.
+#   ANF pool: the direction subspace of x^S is span{e_j : j∉S}, so nesting requires T ⊊ S with |S|=|T|+1;
+#            on bitmasks T ⊂ S implies T < S, and entries are ordered by ascending mask, so for fixed a<b we always
+#            have mask_a ⊂ mask_b, i.e. dim K_A = dim K_B + 1 ⇒ **always kind4, kind3 never appears**.
+#   BDD pool: the same bias is observed (ascending order always kind4, reversed order always kind3, kind1/kind2/None counts unchanged).
 MIRROR_KIND = {None: None, 1: 1, 2: 2, 3: 4, 4: 3}
 
 
-# ------------------------------------------------------------------ 主测试 ----
+# ------------------------------------------------------------------ main test ----
 
 def test_closed_form_agreement(num_vars=5, rounds=1200, max_pairs=600, verbose=False):
-    """闭式与 fn 路径在「可融合性 / 结果维数 / 融合段 / 收益」四项上逐对一致。"""
+    """Closed form and fn path agree pair by pair on four items: fusable / result dimension / fused segment / gain."""
     print(f'Testing closed-form vs fn agreement with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -87,11 +88,11 @@ def test_closed_form_agreement(num_vars=5, rounds=1200, max_pairs=600, verbose=F
                 ca, ra, _ = entries[a]
                 cb, rb, _ = entries[b]
 
-                # ---- 基准:fn 路径 ----
+                # ---- baseline: fn path ----
                 d = shift_fn(ca.fn(), ra, n) ^ shift_fn(cb.fn(), rb, n)
                 ok_fn, dim_fn = is_affine_cube(d, n)
 
-                # ---- 被验证:闭式(正反两序,兼作对称性验证)----
+                # ---- under test: closed form (both orders, doubling as a symmetry check) ----
                 aff_a = canonical_affine(ca, ra)
                 aff_b = canonical_affine(cb, rb)
                 res = fuse_closed(aff_a, aff_b, n)
@@ -99,13 +100,13 @@ def test_closed_form_agreement(num_vars=5, rounds=1200, max_pairs=600, verbose=F
 
                 stat['pairs'] += 1
                 assert res.ok == ok_fn, (
-                    f'可融合性分歧: 闭式={res.ok} fn={ok_fn}\n  A={ca!r} r={ra}\n  B={cb!r} r={rb}')
+                    f'fusable divergence: closed={res.ok} fn={ok_fn}\n  A={ca!r} r={ra}\n  B={cb!r} r={rb}')
 
-                # ---- 对称性:d = f_A⊕f_B 与顺序无关 ⇒ 除 kind 3↔4 互换外全部一致 ----
-                assert res_rev.ok == res.ok, f'对称性破坏(ok): {res.ok} vs {res_rev.ok}'
-                assert res_rev.cancel == res.cancel, f'对称性破坏(cancel)'
+                # ---- symmetry: d = f_A⊕f_B is order-independent ⇒ everything agrees except kind 3↔4 swap ----
+                assert res_rev.ok == res.ok, f'symmetry broken (ok): {res.ok} vs {res_rev.ok}'
+                assert res_rev.cancel == res.cancel, f'symmetry broken (cancel)'
                 assert res_rev.kind == MIRROR_KIND[res.kind], (
-                    f'对称性破坏(kind): 正序={res.kind} 反序={res_rev.kind}\n'
+                    f'symmetry broken (kind): forward={res.kind} reverse={res_rev.kind}\n'
                     f'  A={ca!r} r={ra}\n  B={cb!r} r={rb}')
 
                 if not ok_fn:
@@ -114,35 +115,35 @@ def test_closed_form_agreement(num_vars=5, rounds=1200, max_pairs=600, verbose=F
 
                 if d == 0:
                     stat['cancel'] += 1
-                    assert res.cancel, f'抵消未被闭式识别: A={ca!r} B={cb!r}'
-                    assert res.dim == dim_fn == -1, f'抵消维数约定不一致: {res.dim} vs {dim_fn}'
+                    assert res.cancel, f'cancellation not recognized by the closed form: A={ca!r} B={cb!r}'
+                    assert res.dim == dim_fn == -1, f'cancellation dimension convention mismatch: {res.dim} vs {dim_fn}'
                     continue
 
-                assert not res.cancel, f'闭式误判为抵消(d != 0): A={ca!r} B={cb!r}'
+                assert not res.cancel, f'closed form wrongly judged as cancellation (d != 0): A={ca!r} B={cb!r}'
                 assert res.dim == dim_fn, (
-                    f'结果维数分歧: 闭式={res.dim} fn={dim_fn}\n  A={ca!r} r={ra}\n  B={cb!r} r={rb}')
-                assert res_rev.dim == res.dim, f'对称性破坏(dim): {res.dim} vs {res_rev.dim}'
+                    f'result dimension divergence: closed={res.dim} fn={dim_fn}\n  A={ca!r} r={ra}\n  B={cb!r} r={rb}')
+                assert res_rev.dim == res.dim, f'symmetry broken (dim): {res.dim} vs {res_rev.dim}'
 
-                # ---- 融合段必须逐字段相同(等价于同一仿射集合),正反两序都要对 ----
+                # ---- the fused segment must be field-identical (same affine set), in both orders ----
                 plan_cf = plan_from_affine(res.base, res.basis, n)
                 plan_rev = plan_from_affine(res_rev.base, res_rev.basis, n)
                 plan_fn = plan_from_affine(*affine_from_fn(d, n), n)
                 assert plan_cf == plan_fn, (
-                    f'融合段分歧:\n  闭式={plan_cf!r}\n  fn  ={plan_fn!r}\n'
+                    f'fused segment divergence:\n  closed={plan_cf!r}\n  fn    ={plan_fn!r}\n'
                     f'  A={ca!r} r={ra}\n  B={cb!r} r={rb}')
                 assert plan_rev == plan_fn, (
-                    f'反序融合段分歧:\n  反序={plan_rev!r}\n  fn  ={plan_fn!r}\n'
+                    f'reverse-order fused segment divergence:\n  reverse={plan_rev!r}\n  fn      ={plan_fn!r}\n'
                     f'  A={ca!r} r={ra}\n  B={cb!r} r={rb}')
 
-                # ---- 融合契约:段函数精确等于 d ----
+                # ---- fusion contract: the segment function equals d exactly ----
                 assert CompleteBranch(n, synthetic=plan_cf).fn() == d, (
-                    f'闭式融合契约失败: A={ca!r} ⊕ B={cb!r}')
+                    f'closed-form fusion contract failed: A={ca!r} ⊕ B={cb!r}')
 
-                # ---- 收益口径一致 ----
+                # ---- gain scope agreement ----
                 gain_fn = ca.t_cost() + cb.t_cost() - t_cost(n - dim_fn)
-                assert closed_gain(ca, cb, res, t_cost, n) == gain_fn, '收益口径分歧'
+                assert closed_gain(ca, cb, res, t_cost, n) == gain_fn, 'gain scopes diverge'
 
-                # 正反两序各计一次:kind3/kind4 互镜故计数必然相等,kind1/kind2 自镜故计两次
+                # Count each of the two orders once: kind3/kind4 are mirrors so their counts must be equal; kind1/kind2 are self-mirrors so they count twice
                 stat[f'kind{res.kind}'] += 1
                 stat[f'kind{res_rev.kind}'] += 1
                 if gain_fn > 0:
@@ -150,21 +151,21 @@ def test_closed_form_agreement(num_vars=5, rounds=1200, max_pairs=600, verbose=F
 
     print(f'  checked pairs: {stat["pairs"]}, fusable: {stat["pairs"] - stat["not_fusable"]}, '
           f'cancel: {stat["cancel"]}, positive gain: {stat["positive_gain"]}')
-    print(f'  kind distribution (正反两序各计一次): ' + ', '.join(
+    print(f'  kind distribution (each of the two orders counted once): ' + ', '.join(
         f'{k}={stat[k]}' for k in ('kind1', 'kind2', 'kind3', 'kind4')))
-    # 覆盖率告警:某一情形从未出现 ⇒ 该分支未被验证,不足以支撑阶段 1.1 的切换
+    # Coverage warning: if a case never appears ⇒ that branch is unverified, insufficient to support the Phase 1.1 switch
     unseen = [k for k in ('kind1', 'kind2', 'kind3', 'kind4') if not stat[k]]
     if unseen:
-        print(f'  [WARN] 以下情形在本轮未被覆盖,闭式对应分支未经验证: {", ".join(unseen)}')
+        print(f'  [WARN] the following cases were not covered in this round, so the corresponding closed-form branches are unverified: {", ".join(unseen)}')
     if verbose:
         print(f'  raw stats: {dict(stat)}')
-    assert stat['pairs'] > 0, '未检查到任何分支对,测试无效'
+    assert stat['pairs'] > 0, 'no branch pair was checked; the test is ineffective'
     print('Closed-form agreement test passed!!!')
     return stat
 
 
 def test_closed_form_translation(num_vars=5, rounds=120, samples=8, verbose=False):
-    """平移闭式:canonical_affine(cb, r) 与 affine_from_fn(shift_fn(fn, r)) 描述同一仿射集。"""
+    """Shifted closed form: canonical_affine(cb, r) and affine_from_fn(shift_fn(fn, r)) describe the same affine set."""
     print(f'Testing closed-form translation with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -177,26 +178,26 @@ def test_closed_form_translation(num_vars=5, rounds=120, samples=8, verbose=Fals
             for r in (0, rng.randrange(1 << n), (1 << n) - 1):
                 base_cf, basis_cf = canonical_affine(cb, r)
                 aff = affine_from_fn(shift_fn(cb.fn(), r, n), n)
-                # 子空间相等用「同维 + 双向包含」,不依赖行阶梯形的唯一性
+                # Subspace equality uses "same dimension + mutual inclusion", not the uniqueness of row echelon form
                 assert (len(basis_cf) == len(aff.basis)
                         and _subspace_leq(basis_cf, aff.basis)
                         and _subspace_leq(aff.basis, basis_cf)), (
-                    f'平移后方向子空间分歧: 闭式={basis_cf} fn={aff.basis} (r={r}, {cb!r})')
+                    f'shifted direction subspace divergence: closed={basis_cf} fn={aff.basis} (r={r}, {cb!r})')
                 assert in_span(base_cf ^ aff.base, basis_cf), (
-                    f'平移后 base 不在同一陪集: 闭式={base_cf} fn={aff.base} (r={r}, {cb!r})')
-                # 最强判据:同一仿射集 ⟺ 同一规范 SyntheticPlan
+                    f'shifted base not in the same coset: closed={base_cf} fn={aff.base} (r={r}, {cb!r})')
+                # Strongest criterion: same affine set ⟺ same canonical SyntheticPlan
                 assert (plan_from_affine(base_cf, basis_cf, n)
                         == plan_from_affine(aff.base, aff.basis, n)), (
-                    f'平移后仿射集分歧 (r={r}, {cb!r})')
+                    f'shifted affine set divergence (r={r}, {cb!r})')
                 checked += 1
 
     print(f'  checked (branch, shift) pairs: {checked}')
-    assert checked > 0, '未检查到任何分支,测试无效'
+    assert checked > 0, 'no branch was checked; the test is ineffective'
     print('Closed-form translation test passed!!!')
 
 
 def test_intersection_basis(num_vars=5, rounds=80, max_pairs=40, verbose=False):
-    """_build_joint 的交空间基:维数满足 dim(A∩B) = dimA + dimB − dim(A+B),且成员合法。"""
+    """_build_joint's intersection-space basis: the dimension satisfies dim(A∩B) = dimA + dimB − dim(A+B), and members are valid."""
     print(f'Testing intersection basis with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -213,18 +214,18 @@ def test_intersection_basis(num_vars=5, rounds=80, max_pairs=40, verbose=False):
             _, wb = _build_joint(ka, kb)
             expected = len(ka) + len(kb) - len(reduce_basis(ka + kb))
             assert len(wb) == expected, (
-                f'交空间维数错误: 得到 {len(wb)}, 期望 {expected} (ka={ka}, kb={kb})')
+                f'intersection-space dimension wrong: got {len(wb)}, expected {expected} (ka={ka}, kb={kb})')
             for v in wb:
-                assert in_span(v, ka) and in_span(v, kb), f'交空间向量 {v} 不在两个子空间内'
+                assert in_span(v, ka) and in_span(v, kb), f'intersection-space vector {v} is not in both subspaces'
             checked += 1
 
     print(f'  checked subspace pairs: {checked}')
-    assert checked > 0, '未检查到任何子空间对,测试无效'
+    assert checked > 0, 'no subspace pair was checked; the test is ineffective'
     print('Intersection basis test passed!!!')
 
 
 def test_kind_matches_four_case(num_vars=5, rounds=120, max_pairs=60, verbose=False):
-    """闭式的四情形编号与既有 BranchFusion.four_case_kind 一致(正反两序都比对)。"""
+    """The closed form's four-case numbering matches the existing BranchFusion.four_case_kind (compared in both orders)."""
     print(f'Testing kind agreement with four_case_kind on {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -232,34 +233,35 @@ def test_kind_matches_four_case(num_vars=5, rounds=120, max_pairs=60, verbose=Fa
     seen = Counter()
     for _ in range(rounds):
         tt = random_tt(n)
-        entries = anf_pool(tt.bitstr, n)   # ANF 池 root_mask 恒为 0,可直接与 four_case_kind 比对
+        entries = anf_pool(tt.bitstr, n)   # ANF pool root_mask is always 0, so it can be compared directly with four_case_kind
         if len(entries) < 2:
             continue
         for a, b in _pairs(len(entries), max_pairs):
             ca, cb = entries[a][0], entries[b][0]
-            for x, y in ((ca, cb), (cb, ca)):   # 反序才能覆盖 kind3
+            for x, y in ((ca, cb), (cb, ca)):   # only the reversed order covers kind3
                 res = fuse_closed(canonical_affine(x), canonical_affine(y), n)
                 expected = four_case_kind(x, y)
                 assert res.kind == expected, (
-                    f'情形编号分歧: 闭式={res.kind} four_case_kind={expected}\n  A={x!r}\n  B={y!r}')
+                    f'case numbering divergence: closed={res.kind} four_case_kind={expected}\n  A={x!r}\n  B={y!r}')
                 seen[res.kind] += 1
                 checked += 1
-            # 顺带校验生产实现自身的对称性
+            # Also check the production implementation's own symmetry
             assert four_case_kind(cb, ca) == MIRROR_KIND[four_case_kind(ca, cb)], (
-                f'four_case_kind 对称性破坏:\n  A={ca!r}\n  B={cb!r}')
+                f'four_case_kind symmetry broken:\n  A={ca!r}\n  B={cb!r}')
 
     print(f'  checked (pair, order) combos: {checked}, kinds seen: '
           + ', '.join(f'{k}={seen[k]}' for k in (1, 2, 3, 4)))
-    assert checked > 0, '未检查到任何分支对,测试无效'
+    assert checked > 0, 'no branch pair was checked; the test is ineffective'
     print('Kind agreement test passed!!!')
 
 
 def test_cancellation_closed_form(num_vars=5, rounds=60, samples=6, verbose=False):
     """
-    C1(抵消)分支与 kind1 内部的 C1/C2 判别。
+    The C1 (cancellation) branch and the C1/C2 distinction inside kind1.
 
-    初始池天然不含重复段(实测各 n 均 cancel=0,重复只在融合产物重入池后出现),
-    故必须**显式构造同函数段**才能覆盖 `fuse_closed` 的 cancel 分支。
+    The initial pool naturally contains no duplicate segments (in practice cancel=0 for all n; duplicates
+    only appear after fusion products re-enter the pool), so the `fuse_closed` cancel branch can only be
+    covered by **explicitly constructing segments with the same function**.
     """
     print(f'Testing cancellation branch with {rounds} random {num_vars}-input functions...')
 
@@ -271,41 +273,41 @@ def test_cancellation_closed_form(num_vars=5, rounds=60, samples=6, verbose=Fals
         for cb, r, _ in entries[:samples]:
             base, basis = aff = canonical_affine(cb, r)
 
-            # (a) 自配对必抵消
+            # (a) self-pairing must cancel
             res = fuse_closed(aff, aff, n)
-            assert res.ok and res.cancel and res.dim == -1, f'自配对未判为抵消: {cb!r}'
+            assert res.ok and res.cancel and res.dim == -1, f'self-pair not judged as cancellation: {cb!r}'
             checked['self'] += 1
 
-            # (b) 同函数、不同表示(走线段 vs 合成段)必抵消
+            # (b) same function, different representation (wire-walk segment vs synthetic segment) must cancel
             fn_shifted = shift_fn(cb.fn(), r, n)
             twin = CompleteBranch(n, synthetic=plan_from_affine(*affine_from_fn(fn_shifted, n), n))
-            assert twin.fn() == fn_shifted, f'构造的同函数段不等价: {cb!r}'
+            assert twin.fn() == fn_shifted, f'constructed same-function segment is not equivalent: {cb!r}'
             res_twin = fuse_closed(aff, canonical_affine(twin), n)
-            assert res_twin.ok and res_twin.cancel, f'同函数不同表示未判为抵消: {cb!r}'
+            assert res_twin.ok and res_twin.cancel, f'same function with different representation not judged as cancellation: {cb!r}'
             ok_fn, dim_fn = is_affine_cube(fn_shifted ^ twin.fn(), n)
-            assert ok_fn and dim_fn == -1, 'fn 路径对 d=0 的约定不一致'
+            assert ok_fn and dim_fn == -1, 'fn path convention for d=0 is inconsistent'
             checked['twin'] += 1
 
-            # (c) 负向对照:同 K、异陪集 ⇒ kind1 但**不**抵消,维数 +1(C2)
+            # (c) negative control: same K, different coset ⇒ kind1 but **not** cancellation, dimension +1 (C2)
             v = next((1 << j for j in range(n) if not in_span(1 << j, basis)), None)
-            if v is None:      # dim K = n(常数 1 段),不存在异陪集
+            if v is None:      # dim K = n (constant-1 segment), no different coset exists
                 continue
             res_c2 = fuse_closed(aff, (base ^ v, basis), n)
             assert res_c2.ok and res_c2.kind == 1 and not res_c2.cancel, (
-                f'同 K 异陪集应为 C2 融合而非抵消: {cb!r}')
+                f'same K with different coset should be a C2 fusion, not cancellation: {cb!r}')
             assert res_c2.dim == len(basis) + 1, (
-                f'C2 维数应为 dim K + 1: 得到 {res_c2.dim}, 期望 {len(basis) + 1}')
+                f'C2 dimension should be dim K + 1: got {res_c2.dim}, expected {len(basis) + 1}')
             checked['c2'] += 1
 
     print(f'  self-pairs: {checked["self"]}, twin-pairs: {checked["twin"]}, '
           f'C2 controls: {checked["c2"]}')
-    assert checked['self'] and checked['twin'] and checked['c2'], '抵消/C2 分支未被覆盖'
+    assert checked['self'] and checked['twin'] and checked['c2'], 'cancellation/C2 branches were not covered'
     print('Cancellation branch test passed!!!')
 
 
-# ------------------------------------------------------------------- 入口 ----
+# ------------------------------------------------------------------- entry ----
 
-# n -> (rounds, max_pairs);阶段 0.1 要求覆盖 n=4..7
+# n -> (rounds, max_pairs); Phase 0.1 requires covering n=4..7
 PROFILE = {
     4: (150, 60),
     5: (120, 60),

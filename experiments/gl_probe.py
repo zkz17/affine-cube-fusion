@@ -1,20 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-G-2.2 探针:GL(n,2) 线性子群搜索的收益测量(阶段 3 预研,仅 n ≤ 7)。
+G-2.2 probe: gain measurement of GL(n,2) linear-subgroup search (phase 3 preliminary study, n ≤ 7 only).
 
-原理(Optimization_roadmap.md §3.3):融合引擎对 AGL(n,2) 等变,但 ANF/Möbius
-分解绑定标准坐标基 ⇒ 必须在换坐标后**重新生成池**才有新起点。线性变换 A 的
-电路是 CNOT 网络(**T 免费**,代价在 CX:wrapper = 2 × #CNOT)。
+Principle (Optimization_roadmap.md §3.3): the fusion engine is equivariant under AGL(n,2), but the
+ANF/Möbius decomposition is bound to the standard coordinate basis ⇒ the pool must be **regenerated**
+after a change of coordinates to get a new starting point. The circuit of a linear map A is a CNOT
+network (**T-free**, with the cost in CX: wrapper = 2 × #CNOT).
 
-变体:
-  c0 : 恒等(现状 ANF 路径)
-  cF : FPRM 平移最优(G-2.1)
-  L  : GL 采样 + CNOT 邻域爬山(c=0)
-  LF : 先平移 cF 再 GL 采样 + 爬山(仿射组合)
-指标:融合 ΣT、最佳映射的 wrapper CX(2×#CNOT)、评估次数。
+Variants:
+  c0 : identity (current ANF path)
+  cF : FPRM shift-optimal (G-2.1)
+  L  : GL sampling + CNOT-neighborhood climbing (c=0)
+  LF : first shift by cF, then GL sampling + climbing (affine combination)
+Metrics: fused ΣT, wrapper CX of the best map (2×#CNOT), number of evaluations.
 
-输出:experiments/phase0_results/gl_probe.txt
-用法:./venv/bin/python experiments/gl_probe.py
+Output: experiments/phase0_results/gl_probe.txt
+Usage: ./venv/bin/python experiments/gl_probe.py
 """
 import argparse
 import os
@@ -26,11 +27,11 @@ from collections import Counter
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'gl_probe.txt')
 
-# n -> (cases, GL 采样数, 爬山步数上限)
+# n -> (cases, GL sample count, climb step limit)
 PROFILE = {
     5: (30, 32, 10),
     6: (12, 32, 8),
@@ -39,7 +40,7 @@ PROFILE = {
 
 
 def apply_linear(fn, A, n):
-    """g(x) = f(Ax)。A 以行掩码表示:(Ax)_i = parity(A[i] & x)。"""
+    """g(x) = f(Ax). A is represented by row masks: (Ax)_i = parity(A[i] & x)."""
     out = 0
     for x in range(1 << n):
         y = 0
@@ -52,7 +53,7 @@ def apply_linear(fn, A, n):
 
 
 def compose_transvection_right(A, c, t, n):
-    """A ∘ E,E = CNOT(c → t) 作用于输入:行 i 在 bit t 置位时异或 bit c。"""
+    """A ∘ E, E = CNOT(c → t) acting on the input: row i XORs bit c when bit t is set."""
     out = A[:]
     for i in range(n):
         if (out[i] >> t) & 1:
@@ -61,7 +62,7 @@ def compose_transvection_right(A, c, t, n):
 
 
 def rand_gl(n, k, rng):
-    """k 个随机转vections 之积(必可逆),返回 (A, cnot 列表)。"""
+    """Product of k random transvections (necessarily invertible); returns (A, cnot list)."""
     A = [(1 << i) for i in range(n)]
     cnots = []
     for _ in range(k):
@@ -85,7 +86,7 @@ def make_cost(fn, n, cache):
 
 
 def climb(A0, cnots0, cost, n, max_steps):
-    """CNOT 邻域最陡上升(严格改进);返回 (A, cnots, value)。"""
+    """Steepest ascent over the CNOT neighborhood (strict improvement); returns (A, cnots, value)."""
     A, cnots = A0[:], list(cnots0)
     cur = cost(tuple(A))
     while True:
@@ -109,7 +110,7 @@ def climb(A0, cnots0, cost, n, max_steps):
 
 
 def fprm_best(fn, n):
-    """平移子群全枚举的最优 c(与生产 _fprm_entries 的 n≤8 口径一致)。"""
+    """Optimal c by full enumeration over the translation subgroup (matching the production _fprm_entries convention for n≤8)."""
     best, best_c = None, 0
     for c in range(1 << n):
         g = shift_fn(fn, c, n)
@@ -126,7 +127,7 @@ def main():
     args = ap.parse_args()
     rng = random.Random(args.seed)
 
-    lines = ['G-2.2 探针:GL(n,2) 线性子群搜索收益测量(仅 n ≤ 7)', '']
+    lines = ['G-2.2 probe: gain measurement of GL(n,2) linear-subgroup search (n ≤ 7 only)', '']
     for n, (cases, n_sample, max_steps) in PROFILE.items():
         with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
             data = [int(line.rstrip('\n')) for line in f.readlines()[:cases]]
@@ -140,9 +141,9 @@ def main():
             cost = make_cost(fn, n, cache)
 
             c0 = cost(tuple([1 << i for i in range(n)]))
-            vF, cF = fprm_best(fn, n)   # vF=代价, cF=平移下标(供 LF 变体使用)
+            vF, cF = fprm_best(fn, n)   # vF=cost, cF=translation index (used by the LF variant)
 
-            # ---- 变体 L:c=0,GL 采样 + 爬山 ----
+            # ---- Variant L: c=0, GL sampling + climbing ----
             best_A, best_cnots, best_v = None, None, None
             for _ in range(n_sample):
                 k = rng.choice([n // 2, n, 3 * n // 2])
@@ -152,7 +153,7 @@ def main():
                     best_A, best_cnots, best_v = A, cnots, v
             tL = best_v
 
-            # ---- 变体 LF:先平移 cF,再 GL ----
+            # ---- Variant LF: shift by cF first, then GL ----
             fn_pre = shift_fn(fn, cF, n)
             cache2 = {}
             cost2 = make_cost(fn_pre, n, cache2)
@@ -179,20 +180,20 @@ def main():
         msg = [
             f'====== n = {n}({cases} cases,{wall:.1f}s)======',
             f'ΣT: c0={s_c0} cF={s_cF} L={s_L} LF={s_LF}',
-            f'相对 c0: cF {(s_cF/s_c0-1):+.2%}  L {(s_L/s_c0-1):+.2%}  LF {(s_LF/s_c0-1):+.2%}',
-            f'相对 cF: L {(s_L/s_cF-1):+.2%}  LF {(s_LF/s_cF-1):+.2%}',
-            f'L 优于 cF: {stat["L_better_than_cF"]}/{cases};LF 优于 cF: {stat["LF_better_than_cF"]}/{cases};'
-            f'LF 优于 L: {stat["LF_better_than_L"]}/{cases}',
-            f'最优映射 wrapper CX 合计: {wrap_cx}(平均 {wrap_cx/max(cases,1):.1f}/例;'
-            f'仅对获胜者计,若纳入生产需计入 CX 口径)',
-            f'平均评估次数: {stat["evals"]/max(cases,1):.0f}/例',
+            f'relative to c0: cF {(s_cF/s_c0-1):+.2%}  L {(s_L/s_c0-1):+.2%}  LF {(s_LF/s_c0-1):+.2%}',
+            f'relative to cF: L {(s_L/s_cF-1):+.2%}  LF {(s_LF/s_cF-1):+.2%}',
+            f'L better than cF: {stat["L_better_than_cF"]}/{cases};LF better than cF: {stat["LF_better_than_cF"]}/{cases};'
+            f'LF better than L: {stat["LF_better_than_L"]}/{cases}',
+            f'best-map wrapper CX total: {wrap_cx}(avg {wrap_cx/max(cases,1):.1f}/case;'
+            f'counted only for winners; must be included in the CX convention if adopted in production)',
+            f'avg evaluation count: {stat["evals"]/max(cases,1):.0f}/case',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nResults written to {OUT}')
 
 
 if __name__ == '__main__':

@@ -1,18 +1,18 @@
 # -*- coding: utf-8 -*-
 """
-P3:BDD 路径结构拆解探针(仅 n ≤ 7,支持理论分析)。
+P3: BDD path-structure dissection probe (n ≤ 7 only, for theoretical analysis).
 
-对照四个变体的「路径级」池 ΣT(不取 min,各自独立评估):
-  a : BDD 完整路径(split 模式 + try_absorb_branch 开启,现状)
-  b : BDD 去掉 split 模式与 absorb(仅 Shannon/LIM 构造 + split_neg + reorder)
-  c : ANF 池(c=0)
-  f : FPRM 全枚举最优(平移)
-回答:
-  Q1: a vs b —— 图重写是否被融合引擎完全覆盖(相等/更好 ⇒ 可移除;更差 ⇒ 引擎有空间)
-  Q2: a vs c 在 n 较小处是否真的占优、a vs f 当前后端下 BDD 是否还有贡献;
-      占优用例的特征(deg、|ANF|、|BDD 池|)。
+Compare the "path-level" pool ΣT of four variants (no min; each evaluated independently):
+  a : complete BDD paths (split mode + try_absorb_branch on, current state)
+  b : BDD with split mode and absorb removed (Shannon/LIM construction + split_neg + reorder only)
+  c : ANF pool (c=0)
+  f : FPRM full-enumeration optimum (shift)
+Answers:
+  Q1: a vs b — is graph rewriting fully covered by the fusion engine (equal/better ⇒ removable; worse ⇒ room for the engine)
+  Q2: does a really dominate c at small n, and does BDD still contribute over f under the current backend;
+      features of the cases where a wins (deg, |ANF|, |BDD pool|).
 
-输出:experiments/phase0_results/bdd_path_probe.txt
+Output: experiments/phase0_results/bdd_path_probe.txt
 """
 import os
 import sys
@@ -24,8 +24,8 @@ sys.path.insert(0, ROOT)
 
 from utils.TruthTable import TruthTable
 from limbdd.LimBDDManager import LimBDDManager
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn, anf_degree
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn, anf_degree
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'bdd_path_probe.txt')
 
@@ -33,7 +33,7 @@ PROFILE = {4: (150,), 5: (100,), 6: (60,), 7: (30,)}
 
 
 def bdd_pool_cost(tt, patterns, absorb):
-    """BDD 路径池 ΣT。patterns/absorb=False 时打补丁关闭对应图重写。"""
+    """BDD path-pool ΣT. When patterns/absorb=False, monkey-patch to disable the corresponding graph rewrites."""
     orig_split = LimBDDManager.split_with_pattern
     orig_absorb = LimBDDManager.try_absorb_branch
     if not patterns:
@@ -41,7 +41,7 @@ def bdd_pool_cost(tt, patterns, absorb):
     if not absorb:
         LimBDDManager.try_absorb_branch = staticmethod(lambda *a, **k: None)
     try:
-        synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+        synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
         entries = synth._bdd_entries(tt, None)
         kept, standalone = fuse_pool_global(entries, tt.num_var)
         return pool_t_cost(kept, standalone), len(entries)
@@ -51,7 +51,7 @@ def bdd_pool_cost(tt, patterns, absorb):
 
 
 def main():
-    lines = ['P3:BDD 路径结构拆解(a=完整, b=去模式/吸收, c=ANF, f=FPRM)', '']
+    lines = ['P3:BDD path-structure dissection (a=complete, b=no pattern/absorb, c=ANF, f=FPRM)', '']
     for n, (cases,) in PROFILE.items():
         data = [int(l.rstrip('\n')) for l in
                 open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
@@ -83,15 +83,15 @@ def main():
         msg = [
             f'====== n = {n}({cases} cases,{wall:.1f}s)======',
             f'ΣT: a={s["a"]} b={s["b"]} c={s["c"]} f={s["f"]}',
-            f'Q1(a vs b): 更优 {stat["a<b"]} / 相同 {cases - stat["a<b"] - stat["a>b"]} / 更差 {stat["a>b"]}',
-            f'Q2: a 优于 c(ANF) {stat["a<c"]}/{cases};a 优于 f(FPRM) {stat["a<f"]}/{cases};'
-            f'b 优于 f {stat["b<f"]}/{cases}',
-            f'池规模: BDD(a) 均值 {stat["m_a"]/cases:.1f} vs ANF 均值 {stat["m_c"]/cases:.1f};'
-            f'平均 deg {stat["deg"]/cases:.1f}',
+            f'Q1(a vs b): better {stat["a<b"]} / equal {cases - stat["a<b"] - stat["a>b"]} / worse {stat["a>b"]}',
+            f'Q2: a better than c(ANF) {stat["a<c"]}/{cases};a better than f(FPRM) {stat["a<f"]}/{cases};'
+            f'b better than f {stat["b<f"]}/{cases}',
+            f'pool size: BDD(a) mean {stat["m_a"]/cases:.1f} vs ANF mean {stat["m_c"]/cases:.1f};'
+            f'mean deg {stat["deg"]/cases:.1f}',
         ]
         if w:
-            msg.append(f'a<c 的 {w} 例特征: deg {stat["win_deg"]/w:.1f} | '
-                       f'BDD 池 {stat["win_m_a"]/w:.1f} vs ANF 池 {stat["win_m_c"]/w:.1f}')
+            msg.append(f'features of the {w} cases with a<c: deg {stat["win_deg"]/w:.1f} | '
+                       f'BDD pool {stat["win_m_a"]/w:.1f} vs ANF pool {stat["win_m_c"]/w:.1f}')
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
     with open(OUT, 'w') as fp:

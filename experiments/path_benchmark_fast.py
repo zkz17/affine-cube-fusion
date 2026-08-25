@@ -1,28 +1,28 @@
 """
-路径级性能基准（单起点融合）：no-reorder BDD / BDD(结点数 sifting) / ANF。
+Path-level performance benchmark (single-start fusion): no-reorder BDD / BDD (node-count sifting) / ANF.
 
-每路径报告：
-  T：融合池 ΣT（单起点 fuse_pool_global，与生产一致，不发射电路）；
-  m：池条目数（分解规模）；
-  t_dec：分解阶段耗时（BDD：construct + try_neg/split_neg + sifting + 分片抽取；
-                  ANF：Möbius 变换 + 单项式池）；
-  t_tot：分解 + 融合总耗时。
-prod = min(BDD, ANF)（当前生产组合），耗时 = bn + anf。
+Report per path:
+  T: fused-pool ΣT (single-start fuse_pool_global, matches production, no circuit emission);
+  m: pool entry count (decomposition size);
+  t_dec: decomposition-stage time (BDD: construct + try_neg/split_neg + sifting + piece extraction;
+                  ANF: Möbius transform + monomial pool);
+  t_tot: decomposition + fusion total time.
+prod = min(BDD, ANF) (current production combination), time = bn + anf.
 
-用法: ./venv/bin/python experiments/path_benchmark_fast.py [n ...]   默认 8 9 10 11
+Usage: ./venv/bin/python experiments/path_benchmark_fast.py [n ...]   default 8 9 10 11
 """
 import os
 import random
 import sys
 import time
 
-# 项目根目录（脚本位于 experiments/ 下，故上溯一级）；加入 sys.path 保证 limbdd/utils 可导入
+# Project root (the script lives under experiments/, so go up one level); add to sys.path so limbdd/utils can be imported
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost
 from utils.TruthTable import TruthTable
 
 CASES = {8: 5, 9: 5, 10: 3, 11: 2}
@@ -49,7 +49,7 @@ def anf_path(tt, n):
 
 
 def run(n, cnt):
-    syn = LimBDDOracleSynthesizer(n, 0, fused_backend=True)
+    syn = OracleSynthesizer(n, 0, fused_backend=True)
     keys = ('nr', 'bn', 'anf')
     sums = {k: [0, 0.0] for k in keys}  # T, t_tot
     print(f'=== n={n} ({cnt} cases) ===', flush=True)

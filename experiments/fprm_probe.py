@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-G-2.1 探针:FPRM 平移子群搜索的收益测量(阶段 3 预研)。
+G-2.1 probe: gain measurement of FPRM shift-subgroup search (phase 3 preliminary study).
 
-对 f 施加平移 x ↦ x⊕c:c 的电路实现是 X(c) 三明治(T 免费),故
-  ΣT(最优 c 的 ANF 池融合) = 可实现电路的真实 T 代价。
-c=0 即现状 ANF 路径 ⇒ min 组合结构性零回归。
+Applying the shift x ↦ x⊕c to f: the circuit implementation of c is an X(c) sandwich (T-free), hence
+  ΣT (ANF-pool fusion of the optimal c) = the real T cost of the realizable circuit.
+c=0 is the current ANF path ⇒ the min combination is structurally a zero regression.
 
-指标:
-  base     = min(A_BDD, C_{c=0})                  —— 现状生产后端
-  improved = min(A_BDD, best over c 的 C 池)      —— FPRM 搜索后端
-  另记录 t(deg f) 下界(G-3)与每 c 的 C 路径耗时(决定全枚举/采样预算)。
+Metrics:
+  base     = min(A_BDD, C_{c=0})                  -- current production backend
+  improved = min(A_BDD, C pool best over c)       -- FPRM search backend
+  Also record the t(deg f) lower bound (G-3) and the C-path time per c (which decides the full-enumeration/sampling budget).
 
-口径:复用 LimBDDOracleSynthesizer._bdd_entries(A 池)与 anf_pool + fuse_pool_global(C 池);
-XOR 不变量在 n≤7 全量校验(平移后函数空间)。
+Setup: reuse OracleSynthesizer._bdd_entries (A pool) and anf_pool + fuse_pool_global (C pool);
+the XOR invariant is fully checked for n≤7 (function space after shifting).
 
-输出:experiments/phase0_results/fprm_probe.txt
-用法:./venv/bin/python experiments/fprm_probe.py
+Output: experiments/phase0_results/fprm_probe.txt
+Usage: ./venv/bin/python experiments/fprm_probe.py
 """
 import argparse
 import os
@@ -28,13 +28,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from utils.TruthTable import TruthTable
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.CompleteBranch import t_cost
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.CompleteBranch import t_cost
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'fprm_probe.txt')
 
-# n -> (cases, 平移集合规模;None=全枚举 2^n)
+# n -> (cases, shift-set size; None = full enumeration of 2^n)
 PROFILE = {
     5: (80, None),
     6: (60, None),
@@ -55,7 +55,7 @@ def xor_pool(kept, standalone):
 
 
 def anf_degree(bitstr, n):
-    """f 的 ANF 次数 = 单项式掩码的最大 popcount(G-3 下界 t(deg f) 的输入)。"""
+    """ANF degree of f = maximum popcount of a monomial mask (input to the G-3 lower bound t(deg f))."""
     deg = 0
     for cb, _, _ in anf_pool(bitstr, n):
         deg = max(deg, cb.mask.bit_count())
@@ -68,8 +68,8 @@ def main():
     args = ap.parse_args()
     rng = random.Random(args.seed)
 
-    synth = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
-    lines = ['G-2.1 探针:FPRM 平移子群搜索收益测量', '']
+    synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+    lines = ['G-2.1 probe: FPRM shift-subgroup search gain measurement', '']
     for n, (cases, n_shifts) in PROFILE.items():
         with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
             data = [int(line.rstrip('\n')) for line in f.readlines()[:cases]]
@@ -93,7 +93,7 @@ def main():
                 g = shift_fn(tt.bitstr, c, n)
                 kept, standalone = fuse_pool_global(anf_pool(g, n), n)
                 if n <= 7:
-                    assert xor_pool(kept, standalone) == g, f'XOR 不变量破坏 n={n} c={c}'
+                    assert xor_pool(kept, standalone) == g, f'XOR invariant violated n={n} c={c}'
                 cost = pool_t_cost(kept, standalone)
                 if c == 0:
                     cost_c0 = cost
@@ -116,19 +116,19 @@ def main():
         per_c_ms = wall_c / (cases * len(shifts)) * 1000
         msg = [
             f'====== n = {n} ======',
-            f'cases={cases} shifts={len(shifts)}/2^{n}  C 路径总耗时 {wall_c:.1f}s(每 c 均值 {per_c_ms:.1f} ms)',
+            f'cases={cases} shifts={len(shifts)}/2^{n}  C-path total time {wall_c:.1f}s(mean per c {per_c_ms:.1f} ms)',
             f'ΣT: base={s_base} improved={s_imp}  Δ {s_imp - s_base:+d}({(s_base - s_imp) / max(s_base, 1):.2%})',
             f'cases: better={stat["better"]} same={stat["same"]}',
-            f'G-3 下界 Σ t(deg f)={s_lb}:为 base 的 {s_lb / max(s_base, 1):.2%};'
-            f'余量 base→下界 {(s_base - s_lb) / max(s_base, 1):.2%},improved→下界 {(s_imp - s_lb) / max(s_imp, 1):.2%}',
-            f'全枚举 2^{n} 个 c 的预估 C 路径耗时: {per_c_ms * (1 << n) / 1000:.1f}s/例',
+            f'G-3 lower bound Σ t(deg f)={s_lb}: {s_lb / max(s_base, 1):.2%} of base;'
+            f'headroom base→bound {(s_base - s_lb) / max(s_base, 1):.2%}, improved→bound {(s_imp - s_lb) / max(s_imp, 1):.2%}',
+            f'estimated C-path time for full 2^{n} shifts: {per_c_ms * (1 << n) / 1000:.1f}s/case',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
 
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nresults written to {OUT}')
 
 
 if __name__ == '__main__':

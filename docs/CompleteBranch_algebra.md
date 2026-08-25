@@ -1,6 +1,6 @@
 # CompleteBranch 分支融合的代数基础（详细评审稿）
 
-> 本文件是 `CompleteBranch_fusion_plan.md` 的**代数补充**，只阐述数学内容，不涉及实现细节，供逐条审查。
+> 本文件是代数基础文档，只阐述数学内容，不涉及实现细节，供逐条审查；系统级设计见 `docs/architecture.md`。
 > 所有结论均已在 `experiments/phase0_branch_stats.py` 的探针框架下实测验证；验证方式与数值在文末附录中列出。
 >
 > 记号约定见 §0。建议按 §8 的检查清单逐条核对。

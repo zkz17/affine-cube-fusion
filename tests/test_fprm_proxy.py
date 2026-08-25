@@ -1,21 +1,21 @@
 # -*- coding: utf-8 -*-
 """
-方案 A(fprm_proxy)测试:代理预筛路径的不变量(n ≤ 7)。
+Plan A (fprm_proxy) tests: invariants of the proxy-prescreening path (n ≤ 7).
 
-不变量:
-  1. 零回归 vs C:候选恒含 c=0 ⇒ 代理结果 ΣT ≤ C 路径 ΣT;
-  2. XOR 不变量:获胜池的 XOR = f(x⊕c),平移回 c 后 = f;
-  3. 确定性:同一输入两次结果一致;
-  4. 端到端:fprm_proxy=True 的综合逐例 compute_tt 验证。
-(探索期纪律:fprm_proxy 是**选择关系**,不与默认 F 取 min,故不做与 F 的比较断言;
-  质量差距见 P1 探针:top-8 保留率 71.7%~84.6%。)
+Invariants:
+  1. zero regression vs C: the candidate set always contains c=0 ⇒ proxy result ΣT ≤ C-path ΣT;
+  2. XOR invariant: the winning pool's XOR = f(x⊕c), which after shifting back by c equals f;
+  3. determinism: the same input gives identical results across two runs;
+  4. end-to-end: synthesis with fprm_proxy=True verified case by case via compute_tt.
+(Exploration-phase discipline: fprm_proxy is a **choice relationship**, not a min with default F, so no comparison assertion against F is made;
+  for the quality gap see the P1 probe: top-8 retention 71.7%~84.6%.)
 """
 from random import randint
 
 from utils.TruthTable import TruthTable
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
-from limbdd.fusion.FprmProxy import fprm_proxy_best
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.FprmProxy import fprm_proxy_best
 
 
 def random_tt(num_vars):
@@ -23,7 +23,7 @@ def random_tt(num_vars):
 
 
 def test_proxy_entries(num_vars=5, rounds=100, verbose=False):
-    """代理候选的零回归(vs C)与 XOR 不变量。"""
+    """Zero regression (vs C) and XOR invariant of the proxy candidates."""
     print(f'Testing fprm_proxy entries with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -33,19 +33,19 @@ def test_proxy_entries(num_vars=5, rounds=100, verbose=False):
 
         x = 0
         for cb, r, _ in kept_f:
-            assert r == 0, '代理路径池应全为 r=0 条目'
+            assert r == 0, 'proxy-path pool should contain only r=0 entries'
             x ^= cb.fn()
         for cb in st_f:
             x ^= cb.fn()
-        assert shift_fn(x, c_f, n) == tt.bitstr, f'XOR 不变量破坏: tt={tt.bitstr} c={c_f}'
+        assert shift_fn(x, c_f, n) == tt.bitstr, f'XOR invariant broken: tt={tt.bitstr} c={c_f}'
 
         kept_0, st_0 = fuse_pool_global(anf_pool(tt.bitstr, n), n)
-        assert pool_t_cost(kept_f, st_f) <= pool_t_cost(kept_0, st_0), '代理劣于 C 路径(c=0)'
+        assert pool_t_cost(kept_f, st_f) <= pool_t_cost(kept_0, st_0), 'proxy worse than C path (c=0)'
     print('fprm_proxy entries test passed!!!')
 
 
 def test_proxy_determinism(num_vars=5, rounds=30, verbose=False):
-    """确定性:两次调用结果一致。"""
+    """Determinism: two calls return identical results."""
     print(f'Testing fprm_proxy determinism with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -53,22 +53,22 @@ def test_proxy_determinism(num_vars=5, rounds=30, verbose=False):
         tt = random_tt(n)
         k1, s1, c1 = fprm_proxy_best(tt.bitstr, n)
         k2, s2, c2 = fprm_proxy_best(tt.bitstr, n)
-        assert c1 == c2, '候选平移不一致'
-        assert [cb for cb, _, _ in k1] == [cb for cb, _, _ in k2], 'kept 不一致'
-        assert s1 == s2, 'standalone 不一致'
+        assert c1 == c2, 'candidate shifts differ'
+        assert [cb for cb, _, _ in k1] == [cb for cb, _, _ in k2], 'kept entries differ'
+        assert s1 == s2, 'standalone entries differ'
     print('fprm_proxy determinism test passed!!!')
 
 
 def test_proxy_end_to_end(num_vars=5, rounds=60, verbose=False):
-    """生产路径(fprm_proxy=True)端到端 verify。"""
+    """End-to-end verify of the production path (fprm_proxy=True)."""
     print(f'Testing fprm_proxy end-to-end with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
-    s = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True, fprm_proxy=True)
+    s = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True, fprm_proxy=True)
     for _ in range(rounds):
         tt = random_tt(n)
         s.synthesize(tt)
-        assert s.circ.verify(tt), f'综合验证失败: tt={tt.bitstr}'
+        assert s.circ.verify(tt), f'synthesis verification failed: tt={tt.bitstr}'
     print('fprm_proxy end-to-end test passed!!!')
 
 

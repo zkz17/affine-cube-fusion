@@ -1,12 +1,12 @@
 import sys
 
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from backend.OracleSynthesizer import OracleSynthesizer
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 
 def test_synthesizer(num_var = 3, reorder = False, num_anc = 0):
     fail_list = []
-    synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc)
+    synthesizer = OracleSynthesizer(reorder=reorder, ancilla_num=num_anc)
     max_tt = min(1 << (1 << num_var), 65536)
     for tt in range(max_tt):
         print(tt)
@@ -31,7 +31,7 @@ def test_rand_input(num_var = 5, reorder = False, num_anc = 0, start=0, stop=800
         print(counter, tt)
         
         truth_table = TruthTable(tt, num_var)
-        synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc)
+        synthesizer = OracleSynthesizer(reorder=reorder, ancilla_num=num_anc)
         synthesizer.synthesize(truth_table)
         if not synthesizer.circ.verify(truth_table):
             fail_list.append(tt)

@@ -1,10 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-n≥8 时间冒烟:生产默认后端(F / FP)每例时间构成 + M2 边际;C 池顺带量
-M2 枚举上限(段最多)。A/G 不测(A 非生产默认且 BDD 构图在大 n 慢;
-G 是小 n 强化选项)。只读 data/test_cases,只写 experiments/phase0_results/。
+n≥8 timing smoke test: per-case time breakdown for the production default backends (F / FP)
+plus the M2 margin; the C pool is measured as a side effect of the M2 enumeration upper bound
+(maximum number of segments). A/G are not measured (A is not the production default and BDD
+graph construction is slow at large n; G is a small-n strengthening option). Reads only
+data/test_cases and writes only experiments/phase0_results/.
 
-用法: ./venv/bin/python experiments/m2_n8n9_smoke.py <n> <cases>
+Usage: ./venv/bin/python experiments/m2_n8n9_smoke.py <n> <cases>
 """
 import os
 import sys
@@ -16,11 +18,11 @@ sys.path.insert(0, ROOT)
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 from evaluate import count_costs
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
-from limbdd.fusion.GLSearch import fprm_best
-from limbdd.fusion.FprmProxy import fprm_proxy_best
-from limbdd.fusion.MacroM2 import m2_interleaved
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.GLSearch import fprm_best
+from backend.fusion.FprmProxy import fprm_proxy_best
+from backend.fusion.MacroM2 import m2_interleaved
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'm2_n8n9_smoke.txt')
 
@@ -35,13 +37,13 @@ def main():
     data = [int(l.rstrip('\n')) for l in
             open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
 
-    f_off = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+    f_off = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                     m2_post=False)
-    f_on = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+    f_on = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                    m2_post=True)
-    fp_off = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+    fp_off = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                      fprm_proxy=True, m2_post=False)
-    fp_on = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+    fp_on = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                     fprm_proxy=True, m2_post=True)
 
     acc = dict(F_prep=0.0, F_off=0.0, F_on=0.0, F_T0=0, F_T1=0, F_CX0=0, F_CX1=0,
@@ -49,11 +51,11 @@ def main():
                FP_prep=0.0, FP_off=0.0, FP_on=0.0, FP_T0=0, FP_T1=0, FP_CX0=0, FP_CX1=0,
                FP_gain=0, FP_m2wall=0.0,
                C_off=0.0, C_on=0.0, C_gain=0, C_m2wall=0.0)
-    lines = [f'====== n = {n}({cases} cases), 每例 ms ======', '']
+    lines = [f'====== n = {n}({cases} cases), ms per case ======', '']
 
     for idx, fn in enumerate(data):
         tt = TruthTable(fn, n)
-        row = [f'--- 例 {idx + 1}/{cases}(tt={fn})']
+        row = [f'--- case {idx + 1}/{cases}(tt={fn})']
 
         t0 = time.perf_counter()
         _, cF = fprm_best(fn, n)
@@ -69,7 +71,7 @@ def main():
         mw = time.perf_counter() - t0
         acc['F_m2wall'] += mw
         acc['F_gain'] += base - pool_t_cost(k2, s2)
-        row.append(f'  F  M2 后处理           {fmt(mw)} ms(池T收益 {base - pool_t_cost(k2, s2)})')
+        row.append(f'  F  M2 post-process      {fmt(mw)} ms(pool-T gain {base - pool_t_cost(k2, s2)})')
 
         t0 = time.perf_counter()
         f_off.synthesize(tt)
@@ -87,7 +89,7 @@ def main():
         acc['F_T1'] += t1f
         acc['F_CX1'] += cx1
         assert f_on.circ.verify(tt)
-        row.append(f'  F  整例: off {fmt(toff)}  on {fmt(ton)} ms  '
+        row.append(f'  F  whole case: off {fmt(toff)}  on {fmt(ton)} ms  '
                    f'(T {t0f}→{t1f}, CX {cx0}→{cx1})')
 
         t0 = time.perf_counter()
@@ -104,7 +106,7 @@ def main():
         acc['FP_m2wall'] += mw
         base = pool_t_cost(kept, st)
         acc['FP_gain'] += base - pool_t_cost(k2, s2)
-        row.append(f'  FP M2 后处理           {fmt(mw)} ms(池T收益 {base - pool_t_cost(k2, s2)})')
+        row.append(f'  FP M2 post-process      {fmt(mw)} ms(pool-T gain {base - pool_t_cost(k2, s2)})')
 
         t0 = time.perf_counter()
         fp_off.synthesize(tt)
@@ -122,7 +124,7 @@ def main():
         acc['FP_T1'] += t1f
         acc['FP_CX1'] += cx1
         assert fp_on.circ.verify(tt)
-        row.append(f'  FP 整例: off {fmt(toff)}  on {fmt(ton)} ms  '
+        row.append(f'  FP whole case: off {fmt(toff)}  on {fmt(ton)} ms  '
                    f'(T {t0f}→{t1f}, CX {cx0}→{cx1})')
 
         kept, st = fuse_pool_global(anf_pool(fn, n), n)
@@ -132,19 +134,19 @@ def main():
         mw = time.perf_counter() - t0
         acc['C_m2wall'] += mw
         acc['C_gain'] += base - pool_t_cost(k2, s2)
-        row.append(f'  C  M2 后处理           {fmt(mw)} ms(池T收益 {base - pool_t_cost(k2, s2)},'
-                   f'池 m={len(kept) + len(st)})')
+        row.append(f'  C  M2 post-process      {fmt(mw)} ms(pool-T gain {base - pool_t_cost(k2, s2)},'
+                   f'pool m={len(kept) + len(st)})')
 
         print('\n'.join(row), flush=True)
         lines += row
 
     c = len(data)
-    msg = [f'--- n={n} 平均(ms/例) ---',
-           f'F  : prep={fmt(acc["F_prep"]/c)}  整例 off={fmt(acc["F_off"]/c)}  '
-           f'on={fmt(acc["F_on"]/c)}  M2={fmt(acc["F_m2wall"]/c)}  池T收益 Σ={acc["F_gain"]}',
-           f'FP : prep={fmt(acc["FP_prep"]/c)}  整例 off={fmt(acc["FP_off"]/c)}  '
-           f'on={fmt(acc["FP_on"]/c)}  M2={fmt(acc["FP_m2wall"]/c)}  池T收益 Σ={acc["FP_gain"]}',
-           f'C  : M2={fmt(acc["C_m2wall"]/c)}  池T收益 Σ={acc["C_gain"]}',
+    msg = [f'--- n={n} averages (ms/case) ---',
+           f'F  : prep={fmt(acc["F_prep"]/c)}  whole off={fmt(acc["F_off"]/c)}  '
+           f'on={fmt(acc["F_on"]/c)}  M2={fmt(acc["F_m2wall"]/c)}  pool-T gain Σ={acc["F_gain"]}',
+           f'FP : prep={fmt(acc["FP_prep"]/c)}  whole off={fmt(acc["FP_off"]/c)}  '
+           f'on={fmt(acc["FP_on"]/c)}  M2={fmt(acc["FP_m2wall"]/c)}  pool-T gain Σ={acc["FP_gain"]}',
+           f'C  : M2={fmt(acc["C_m2wall"]/c)}  pool-T gain Σ={acc["C_gain"]}',
            f'ΣT: F {acc["F_T0"]}→{acc["F_T1"]}({(acc["F_T1"]/acc["F_T0"]-1):+.2%})  '
            f'FP {acc["FP_T0"]}→{acc["FP_T1"]}({(acc["FP_T1"]/acc["FP_T0"]-1):+.2%})',
            f'ΣCX: F {acc["F_CX0"]}→{acc["F_CX1"]}({(acc["F_CX1"]/acc["F_CX0"]-1):+.2%})  '

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-P5(诊断):SplitLv2Pattern 类型 3「借 0 边」的确切代数快照。
+P5 (diagnostic): exact algebraic snapshot of SplitLv2Pattern type 3 "borrow a 0 edge".
 
-流程:构造随机小函数 → 定位 type-3 候选 → 抽取拆分前分支池 → 执行拆分 →
-抽取拆分后分支池(原图 + 新片) → 找出只存在于前/后的段,打印函数与代价,
-验证:恒等式、代价变化、「0 = 1⊕1」的借用结构。
+Flow: build a random small function → locate a type-3 candidate → extract the pre-split branch pool → perform the split →
+extract the post-split branch pool (original graph + new pieces) → find the segments that exist only before/after, print the function and costs,
+verify: identity, cost change, and the "0 = 1⊕1" borrowing structure.
 
-输出:experiments/phase0_results/split_type3_snapshot.txt
+Output: experiments/phase0_results/split_type3_snapshot.txt
 """
 import os
 import sys
@@ -19,16 +19,16 @@ sys.path.insert(0, ROOT)
 from utils.TruthTable import TruthTable
 from limbdd.LimBDD import LimBDD
 from limbdd.LimBDDManager import LimBDDManager
-from limbdd.CompleteBranch import extract_complete_branches, abs_lim
+from limbdd.Extraction import abs_lim, extract_complete_branches
 from limbdd.patterns.SplitLv2Pattern import SplitLv2Pattern
-from limbdd.fusion.BranchFusion import anf_degree, shift_fn
-from limbdd.CompleteBranch import t_cost
+from backend.fusion.BranchFusion import anf_degree, shift_fn
+from backend.CompleteBranch import t_cost
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'split_type3_snapshot.txt')
 
 
 def pool_of(limbdd, n):
-    """整图分支池(有效函数:根掩码平移已换算):{(fn, cost): count}。"""
+    """Whole-graph branch pool (effective function: root-mask shift already applied): {(fn, cost): count}."""
     r = abs_lim(limbdd.root.lim, limbdd.var_order)
     c = Counter()
     for cb in extract_complete_branches(limbdd, n, anomalies=Counter()):
@@ -48,7 +48,7 @@ def pool_of_pieces(pieces, n):
 
 
 def find_type3(mgr):
-    """返回 (node, level) 或 None。"""
+    """Return (node, level) or None."""
     pat = SplitLv2Pattern()
     for level in range(2, mgr.limbdd.root.level + 1):
         cands = pat.identify_candidates(mgr.limbdd, level)
@@ -77,7 +77,7 @@ def main():
             node, connect_list, succ_l, succ_r, ptype, succ_info = cand
             before = pool_of(mgr.limbdd, n)
 
-            # 执行拆分(只对主图;新片进入 mgr.temp_list)
+            # Perform the split (main graph only; new pieces go into mgr.temp_list)
             mgr.perform_split(mgr.limbdd)
             mgr.append_temp_to_list()
             pieces = [mgr.limbdd]
@@ -96,13 +96,13 @@ def main():
             for (fn, _, _), cnt in after.items():
                 x_a ^= fn * (cnt & 1)
 
-            msg = [f'--- 例 n={n} tt={tt_int}(deg={anf_degree(tt_int, n)}, 触发层 {level}) ---',
-                   f'全池 XOR 不变: {x_b == x_a}({x_b:0{1 << n}b});'
-                   f'池段数 {sum(before.values())} → {sum(after.values())}',
-                   f'拆分前独有段({sum(only_before.values())} 条, Σcost={s_before}):']
+            msg = [f'--- case n={n} tt={tt_int} (deg={anf_degree(tt_int, n)}, trigger level {level}) ---',
+                   f'full-pool XOR invariant: {x_b == x_a} ({x_b:0{1 << n}b}); '
+                   f'pool segment count {sum(before.values())} → {sum(after.values())}',
+                   f'segments only before split ({sum(only_before.values())} items, Σcost={s_before}):']
             for (fn, cost, k), cnt in only_before.items():
                 msg.append(f'  fn={fn:0{1 << n}b} cost={cost} nctrl={k} ×{cnt}')
-            msg.append(f'拆分后独有段({sum(only_after.values())} 条, Σcost={s_after}):')
+            msg.append(f'segments only after split ({sum(only_after.values())} items, Σcost={s_after}):')
             for (fn, cost, k), cnt in only_after.items():
                 msg.append(f'  fn={fn:0{1 << n}b} cost={cost} nctrl={k} ×{cnt}')
             print('\n'.join(msg), flush=True)
@@ -112,7 +112,7 @@ def main():
                 break
         if found >= 3:
             break
-    print(f'\n耗时 {time.perf_counter()-t0:.1f}s, 找到 {found} 例')
+    print(f'\ntime {time.perf_counter()-t0:.1f}s, {found} cases found')
     with open(OUT, 'w') as f:
         f.write('\n'.join(out) + '\n')
 

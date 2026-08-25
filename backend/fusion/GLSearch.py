@@ -1,26 +1,27 @@
 # -*- coding: utf-8 -*-
 """
-G-2.2:确定性 GL(n,2) 局部搜索(生产路径的**可选**开关,默认关闭)。
+G-2.2: deterministic GL(n,2) local search (an **optional** switch on the production path, off by default).
 
-设计(gl_det_probe 实测定稿,去随机化):
-  - 基线:FPRM 最优平移 cF(含 c=0;n≤8 全枚举,n≥9 双起点平移爬山);
-  - 起点集:{恒等 on f, 恒等 on f∘τ_cF} ∪ {全部单 CNOT E_ij on f∘τ_cF},
-    共 2 + n(n−1) 个,**无任何随机性**;
-  - 爬山:CNOT 邻域最陡上升、严格改进、步数上限 max_steps;
-  - 候选含 cF 本身(零 wrapper);T 并列时优先零 wrapper ⇒ 结果 ≤ FPRM 最优
-    (支配链 G ≤ F ≤ C 保持),且 CX 不因并列而多付。
+Design (finalized by gl_det_probe measurements, de-randomized):
+  - baseline: FPRM-optimal shift cF (including c=0; n≤8 full enumeration, n≥9 two-start shift climbing);
+  - start set: {identity on f, identity on f∘τ_cF} ∪ {all single-CNOT E_ij on f∘τ_cF},
+    totaling 2 + n(n−1) starts, **fully deterministic**;
+  - climbing: steepest ascent in the CNOT neighborhood, strict improvement, step cap max_steps;
+  - candidates include cF itself (zero wrapper); on T ties the zero wrapper is preferred, so the result
+    ≤ FPRM optimum (dominance chain G ≤ F ≤ C preserved) and CX is not overpaid due to ties.
 
-代价构成(n=7 实测):~2400 次评估 × 2.55ms,其中 **94% 是 fuse_pool_global**
-(每次换坐标都要重新 Möbius + 融合,无法复用)——这是开关默认关闭的原因。
+Cost composition (measured at n=7): ~2400 evaluations × 2.55ms, of which **94% is fuse_pool_global**
+(every coordinate change requires a fresh Möbius + fusion, no reuse) -- this is why the switch is off
+by default.
 
-返回 (kept, standalone, shift_c, cnots):获胜池是 g(x) = f(Ax ⊕ c) 的池,
-发射三明治 = X(c) · CNOT(A⁻¹) · [段] · CNOT(A) · X(c)(T 免费,CNOT 计入 CX)。
+Returns (kept, standalone, shift_c, cnots): the winning pool is the pool of g(x) = f(Ax ⊕ c);
+emission sandwich = X(c) · CNOT(A⁻¹) · [segments] · CNOT(A) · X(c) (T-free, CNOTs counted in CX).
 """
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn
 
 
 def apply_linear(fn, A, n):
-    """g(x) = f(Ax)。A 以行掩码表示:(Ax)_i = parity(A[i] & x)。"""
+    """g(x) = f(Ax). A is given by row masks: (Ax)_i = parity(A[i] & x)."""
     out = 0
     for x in range(1 << n):
         y = 0
@@ -33,7 +34,7 @@ def apply_linear(fn, A, n):
 
 
 def compose_transvection_right(A, c, t, n):
-    """A ∘ E,E = CNOT(c → t) 作用于输入:行 i 在 bit t 置位时异或 bit c。"""
+    """A ∘ E, E = CNOT(c → t) acting on the input: row i XORs bit c when bit t is set."""
     out = A[:]
     for i in range(n):
         if (out[i] >> t) & 1:
@@ -52,7 +53,7 @@ def make_cost(fn, n, cache):
 
 
 def climb_best(A0, cnots0, cost, n, max_steps):
-    """CNOT 邻域最陡上升(严格改进);返回 (A, cnots, value)。"""
+    """Steepest ascent in the CNOT neighborhood (strict improvement); returns (A, cnots, value)."""
     A, cnots = A0[:], list(cnots0)
     cur = cost(tuple(A))
     while True:
@@ -76,7 +77,7 @@ def climb_best(A0, cnots0, cost, n, max_steps):
 
 
 def fprm_best(fn, n):
-    """FPRM 最优平移(与生产 _fprm_entries 的预算口径完全一致)。返回 (代价, c)。"""
+    """FPRM-optimal shift (budget policy identical to production _fprm_entries). Returns (cost, c)."""
     full = 1 << n
     if full <= 256:
         shifts = range(full)
@@ -88,7 +89,7 @@ def fprm_best(fn, n):
             if best is None or v < best:
                 best, best_c = v, c
         return best, best_c
-    # n ≥ 9:双起点平移爬山(与生产 _fprm_entries 一致,确定性)
+    # n ≥ 9: two-start shift climbing (identical to production _fprm_entries, deterministic)
     cache = {}
 
     def eval_c(c):
@@ -116,12 +117,12 @@ def fprm_best(fn, n):
 
 def gl_search(fn, n, max_steps=3):
     """
-    确定性 GL 搜索(可选开关激活时调用)。
+    Deterministic GL search (called when the optional switch is active).
 
-    返回 (kept, standalone, shift_c, cnots):
-      shift_c : 获胜候选的平移(FPRM 基线);
-      cnots   : 获胜线性映射 A 的 CNOT 分解(生成顺序,A = E1∘…∘Ek ⇒
-                A⁻¹ 按 cnots 正序施加、A 按逆序施加)。
+    Returns (kept, standalone, shift_c, cnots):
+      shift_c : the winning candidate's shift (FPRM baseline);
+      cnots   : the CNOT decomposition of the winning linear map A (generation order,
+                A = E1∘…∘Ek, so A⁻¹ applies cnots in forward order and A in reverse).
     """
     vF, cF = fprm_best(fn, n)
     ident = [1 << i for i in range(n)]

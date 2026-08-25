@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-数据汇总:data/our_cost 三文件夹(t_cost/cx_cost/deg_bound + 根目录 results)
-的简单汇总。只读数据目录,输出写 experiments/phase0_results/。
+Data summary: a simple summary of the three data/our_cost folders (t_cost/cx_cost/deg_bound + root-level results).
+Read-only over the data directory; output is written to experiments/phase0_results/.
 
-口径:
-  - A/C/F/FP n=3..10(n=3 全 256,n=4 全 65536,n=5-7 10000,n=8-10 1000);
-  - G 仅 n=3..6(n=7 省略,不参与 n≥8);
-  - 基线 Exorcism 全 n;SSHR 仅 n=3..6(n≥7 无数据,自动跳过)。
+Scope:
+  - A/C/F/FP n=3..10 (n=3 all 256, n=4 all 65536, n=5-7 10000, n=8-10 1000);
+  - G only n=3..6 (n=7 omitted, does not participate for n≥8);
+  - baseline Exorcism all n; SSHR only n=3..6 (no data for n≥7, skipped automatically).
 """
 import os
 import re
@@ -82,7 +82,7 @@ def main():
                              sshr_t=sshr_t, sshr_cx=sshr_cx))
     rows.sort(key=lambda r: (r['n'], r['tag']))
 
-    lines = ['数据汇总(2025-08-24,融合后端 = 当前生产默认,m2_post 开启)', '']
+    lines = ['Data summary (2025-08-24, fused backend = current production default, m2_post on)', '']
     lines.append('=== ΣT(ours)===')
     lines.append('  n   ' + ' '.join(f'{t:>9}' for t in ('A', 'C', 'F', 'FP', 'G')))
     for n in sorted({r['n'] for r in rows}):
@@ -95,7 +95,7 @@ def main():
         d = {r['tag']: r['scx'] for r in rows if r['n'] == n}
         lines.append(f'  {n:>2}  ' + ' '.join(f'{d.get(t, -1):>9}' for t in ('A', 'C', 'F', 'FP', 'G')))
     lines.append('')
-    lines.append('=== 平均 wall(ms/例)===')
+    lines.append('=== avg wall (ms/case) ===')
     lines.append('  n   ' + ' '.join(f'{t:>9}' for t in ('A', 'C', 'F', 'FP', 'G')))
     for n in sorted({r['n'] for r in rows}):
         d = {r['tag']: (r['res']['wall'] if r['res'] and r['res']['wall'] is not None else None)
@@ -103,7 +103,7 @@ def main():
         lines.append(f'  {n:>2}  ' + ' '.join(f'{d.get(t, -1):>9.1f}' if d.get(t) is not None else '        -'
                                               for t in ('A', 'C', 'F', 'FP', 'G')))
     lines.append('')
-    lines.append('=== Exorcism ΣT 缩减(负=更高;括号 higher 例数)===')
+    lines.append('=== Exorcism ΣT reduction (negative = higher; higher-case count in parens) ===')
     lines.append('  n   ' + ' '.join(f'{t:>13}' for t in ('A', 'C', 'F', 'FP', 'G')))
     for n in sorted({r['n'] for r in rows}):
         d = {}
@@ -114,7 +114,7 @@ def main():
             d[r['tag']] = f'{e[3]:+.2%}(h{e[1]})' if e else '--'
         lines.append(f'  {n:>2}  ' + ' '.join(f'{d.get(t, "--"):>13}' for t in ('A', 'C', 'F', 'FP', 'G')))
     lines.append('')
-    lines.append('=== Exorcism ΣCX 缩减(括号 higher 例数)===')
+    lines.append('=== Exorcism ΣCX reduction (higher-case count in parens) ===')
     lines.append('  n   ' + ' '.join(f'{t:>13}' for t in ('A', 'C', 'F', 'FP', 'G')))
     for n in sorted({r['n'] for r in rows}):
         d = {}
@@ -125,7 +125,7 @@ def main():
             d[r['tag']] = f'{e[3]:+.2%}(h{e[1]})' if e else '--'
         lines.append(f'  {n:>2}  ' + ' '.join(f'{d.get(t, "--"):>13}' for t in ('A', 'C', 'F', 'FP', 'G')))
     lines.append('')
-    lines.append('=== SSHR ΣT / ΣCX 缩减(n=3..6)===')
+    lines.append('=== SSHR ΣT / ΣCX reduction (n=3..6) ===')
     lines.append('  n   ' + ' '.join(f'{t:>13}' for t in ('A', 'C', 'F', 'FP', 'G')))
     for n in (3, 4, 5, 6):
         d = {}
@@ -137,7 +137,7 @@ def main():
             d[r['tag']] = f'{e_t[3]:+.1%}/{e_c[3]:+.1%}' if (e_t and e_c) else '--'
         lines.append(f'  {n:>2}  ' + ' '.join(f'{d.get(t, "--"):>13}' for t in ('A', 'C', 'F', 'FP', 'G')))
     lines.append('')
-    lines.append('=== G-3 下界占 ours ΣT 比例 ===')
+    lines.append('=== G-3 bound share of ours ΣT ===')
     lines.append('  n   ' + ' '.join(f'{t:>9}' for t in ('A', 'C', 'F', 'FP', 'G')))
     for n in sorted({r['n'] for r in rows}):
         d = {r['tag']: r['res']['bound_ratio'] if r['res'] and r['res']['bound_ratio'] is not None else None
@@ -148,7 +148,7 @@ def main():
     print(text)
     with open(OUT, 'w') as f:
         f.write(text)
-    print(f'\n汇总已写入 {OUT}')
+    print(f'\nSummary written to {OUT}')
 
 
 if __name__ == '__main__':

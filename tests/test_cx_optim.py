@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-B-4(CX 优化)测试:段重排 + 发射基选择的正确性与不变量。
+B-4 (CX optimization) tests: correctness and invariants of segment reordering + emission basis selection.
 
-不变量:
-  1. T 不变:发射基选择与段顺序都不改变段集合与控制数 ⇒ 发射 ΣT == 池 ΣT;
-  2. CX 不劣:plan_min_cx 的 CNOT 数 ≤ 规范 plan;重排输出 CX ≤ 原始顺序;
-  3. 语义不变:新发射电路 compute_tt == 真值表;
-  4. 计数一致性:词项级 term_cx_cost == qiskit 级 count_cx_cost。
+Invariants:
+  1. T unchanged: neither emission basis selection nor segment order changes the segment set or control counts ⇒ emitted ΣT == pool ΣT;
+  2. CX no worse: plan_min_cx's CNOT count ≤ the canonical plan; reordered output CX ≤ the original order;
+  3. semantics preserved: the new emitted circuit's compute_tt == truth table;
+  4. counting consistency: term-level term_cx_cost == qiskit-level count_cx_cost.
 """
 from random import randint
 
@@ -14,8 +14,8 @@ from utils.Qubit import QubitManager
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 from evaluate import count_cx_cost, count_t_cost
-from limbdd.CompleteBranch import CompleteBranch, plan_from_affine, plan_min_cx
-from limbdd.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost
+from backend.CompleteBranch import CompleteBranch, plan_from_affine, plan_min_cx
+from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy, term_cx_cost_list
 
 
@@ -31,7 +31,7 @@ def _qm(n):
 
 
 def test_plan_min_cx(num_vars=5, rounds=200, verbose=False):
-    """plan_min_cx:控制数不变、CNOT 不增、发射语义不变。"""
+    """plan_min_cx: control count unchanged, CNOTs not increased, emission semantics preserved."""
     print(f'Testing plan_min_cx with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -42,18 +42,18 @@ def test_plan_min_cx(num_vars=5, rounds=200, verbose=False):
             base, basis = cb.affine()
             canon = plan_from_affine(base, basis, n)
             best = plan_min_cx(base, basis, n)
-            assert len(best.controls) == len(canon.controls), '控制数必须不变(T 不变)'
-            assert len(best.cnot_ops) <= len(canon.cnot_ops), 'plan_min_cx 不应增加 CNOT'
+            assert len(best.controls) == len(canon.controls), 'control count must stay unchanged (T unchanged)'
+            assert len(best.cnot_ops) <= len(canon.cnot_ops), 'plan_min_cx must not increase CNOTs'
 
             twin = CompleteBranch(n, synthetic=canon)
-            assert twin.to_circuit(qm).compute_tt() == twin.fn(), 'CX 最优基发射语义破坏'
+            assert twin.to_circuit(qm).compute_tt() == twin.fn(), 'CX-optimal basis emission broke semantics'
     print('plan_min_cx test passed!!!')
 
 
 def test_emission_t_invariant(num_vars=5, rounds=100, verbose=False):
     """
-    端到端不变量(单池口径):重排 + CX 最优基发射后
-    T == 池 ΣT、compute_tt == 真值表、词项级与 qiskit 级 CX 计数一致。
+    End-to-end invariants (single-pool scope): after reordering + CX-optimal basis emission,
+    T == pool ΣT, compute_tt == truth table, and term-level and qiskit-level CX counts agree.
     """
     print(f'Testing emission T-invariance with {rounds} random {num_vars}-input functions...')
 
@@ -70,14 +70,14 @@ def test_emission_t_invariant(num_vars=5, rounds=100, verbose=False):
             circ.merge(seg_circ)
         circ.simplify_terms()
 
-        assert count_t_cost(to_qiskit(circ)) == pool_t_cost(kept, standalone), '发射 T ≠ 池 ΣT'
-        assert circ.compute_tt() == tt.bitstr, '发射语义破坏'
-        assert count_cx_cost(to_qiskit(circ)) == circ.term_cx_cost(), 'CX 计数口径不一致'
+        assert count_t_cost(to_qiskit(circ)) == pool_t_cost(kept, standalone), 'emitted T != pool ΣT'
+        assert circ.compute_tt() == tt.bitstr, 'emission broke semantics'
+        assert count_cx_cost(to_qiskit(circ)) == circ.term_cx_cost(), 'CX counting scopes disagree'
     print('Emission T-invariance test passed!!!')
 
 
 def test_order_segments_unit(num_vars=5, rounds=100, verbose=False):
-    """order_segments_greedy 单元:经真实 merge 管线的输出 CX ≤ 原始顺序。"""
+    """order_segments_greedy unit: output CX after the real merge pipeline ≤ the original order."""
     print(f'Testing order_segments_greedy with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -94,7 +94,7 @@ def test_order_segments_unit(num_vars=5, rounds=100, verbose=False):
             scratch.simplify_terms()
             return scratch.term_cx_cost()
 
-        assert total_cx(ordered) <= total_cx(segs), '重排不应劣于原始顺序'
+        assert total_cx(ordered) <= total_cx(segs), 'reordering must not be worse than the original order'
     print('order_segments_greedy unit test passed!!!')
 
 

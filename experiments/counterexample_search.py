@@ -1,15 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-成对完备性猜想（CompleteBranch_algebra.md §4 开问题）的随机反例搜索。
+Random counterexample search for the pairwise completeness conjecture (open problem in CompleteBranch_algebra.md §4).
 
-猜想（k=3 基例）：若三个仿射立方（分支段）的 XOR 是仿射立方 D，
-则必存在一对 (i,j) 其 XOR 为仿射立方（C1–C4，即 2-to-1 可融合）。
+Conjecture (k=3 base case): if the XOR of three affine cubes (branch segments) is an affine cube D,
+then there must exist a pair (i,j) whose XOR is an affine cube (C1–C4, i.e. 2-to-1 fusible).
 
-搜索：随机生成三元组 CompleteBranch（随机 SyntheticPlan），
-筛出 d = f1^f2^f3 为仿射立方、且三对两两均不可融合（is_fusable=False）者 = 反例。
+Search: randomly generate triples of CompleteBranch (random SyntheticPlan),
+and select those where d = f1^f2^f3 is an affine cube and no pair is fusible (is_fusable=False) = counterexample.
 
-用法：python counterexample_search.py n examples [seed]
-输出：stdout + experiments/phase0_results/cex_search_{n}_{seed}.txt
+Usage: python counterexample_search.py n examples [seed]
+Output: stdout + experiments/phase0_results/cex_search_{n}_{seed}.txt
 """
 import argparse
 import os
@@ -17,18 +17,18 @@ import random
 import sys
 import time
 
-# 项目根目录（脚本位于 experiments/ 下，故上溯一级）；加入 sys.path 保证 limbdd/utils 可导入
+# Project root (script lives under experiments/, so go up one level); add to sys.path so limbdd/utils is importable
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 EXPERIMENTS = os.path.join(ROOT, 'experiments')
 
-from limbdd.CompleteBranch import CompleteBranch, SyntheticPlan, is_affine_cube
-from limbdd.fusion.BranchFusion import is_fusable
+from backend.CompleteBranch import CompleteBranch, SyntheticPlan, is_affine_cube
+from backend.fusion.BranchFusion import is_fusable
 
 
 def random_cube(n, rng):
-    """随机仿射立方：随机 X 平移 + 随机 CNOT 链 + 随机控制子集/极性。"""
+    """Random affine cube: random X translation + random CNOT chain + random control subset/polarity."""
     x_trans = rng.getrandbits(n) & ((1 << n) - 1)
     cnot_ops = []
     for _ in range(rng.randrange(0, n + 1)):
@@ -42,12 +42,12 @@ def random_cube(n, rng):
 
 def search(n, examples, seed):
     rng = random.Random(seed)
-    total = 0          # 三元组总数
-    cand = 0           # d 为仿射立方的候选数
-    cex = 0            # 反例数（候选且三对均不可融合）
+    total = 0          # total number of triples
+    cand = 0           # candidates where d is an affine cube
+    cex = 0            # counterexamples (candidate and no pair fusible)
     dim_hist = {}
     t0 = time.time()
-    lines = [f'# 成对完备性反例搜索  n={n}  examples={examples}  seed={seed}']
+    lines = [f'# pairwise-completeness counterexample search  n={n}  examples={examples}  seed={seed}']
 
     for i in range(examples):
         a = random_cube(n, rng)
@@ -75,16 +75,16 @@ def search(n, examples, seed):
 
     lines += [
         '',
-        f'# 统计: 总数 {total}, d-仿射候选 {cand} ({cand/max(1,total):.2%}), 反例 {cex}',
-        f'# 候选 dim 分布: {dict(sorted(dim_hist.items()))}',
-        f'# 耗时 {time.time()-t0:.1f}s',
+        f'# stats: total {total}, d-affine candidates {cand} ({cand/max(1,total):.2%}), counterexamples {cex}',
+        f'# candidate dim histogram: {dict(sorted(dim_hist.items()))}',
+        f'# time {time.time()-t0:.1f}s',
     ]
     print('\n'.join(lines))
     out_dir = os.path.join(EXPERIMENTS, 'phase0_results')
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, f'cex_search_{n}_{seed}.txt'), 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'[已写入 experiments/phase0_results/cex_search_{n}_{seed}.txt]')
+    print(f'[written to experiments/phase0_results/cex_search_{n}_{seed}.txt]')
 
 
 def main():

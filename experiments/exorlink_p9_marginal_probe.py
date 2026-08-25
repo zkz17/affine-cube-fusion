@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-P9-M 边际探针:m2_post 开关的生产端到端 T/CX 对比(五项路径)。
+P9-M marginal probe: production end-to-end T/CX comparison for the m2_post switch (five paths).
 
-直接用生产合成器(m2_post=False / True)综合同一批测例,发射后按
-evaluate.py 的 count_costs(T/CX 双口径)计数——与最终生产路径完全一致
-(含 G 的线性 wrapper、B-4 段重排、simplify)。规模 n=5/6/7(25/15/6),
-与 P9 探针同口径,只写 experiments/phase0_results/。
+Synthesize the same batch of test cases directly with the production synthesizer (m2_post=False / True), then after emission count with evaluate.py's count_costs (T/CX dual conventions) —— exactly matching the final production path
+(including G's linear wrapper, B-4 segment reordering, simplify). Sizes n=5/6/7 (25/15/6),
+same convention as the P9 probe, only writes experiments/phase0_results/.
 """
 import os
 import sys
@@ -18,7 +17,7 @@ sys.path.insert(0, ROOT)
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 from evaluate import count_costs
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from backend.OracleSynthesizer import OracleSynthesizer
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'exorlink_p9_marginal_probe.txt')
 PROFILE = {5: 25, 6: 15, 7: 6}
@@ -27,7 +26,7 @@ CONFIGS = [('F', False, False), ('A', False, False), ('C', False, False),
 
 
 def main():
-    lines = ['P9-M 边际探针:生产端到端 m2_post 开关 T/CX 对比(五项路径)', '']
+    lines = ['P9-M marginal probe: production end-to-end T/CX comparison of the m2_post switch (five paths)', '']
     for n, cases in PROFILE.items():
         data = [int(l.rstrip('\n')) for l in
                 open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
@@ -36,8 +35,8 @@ def main():
             kwargs = dict(reorder=True, ancilla_num=0, fused_backend=True,
                           gl_search=gl, fprm_proxy=proxy,
                           paths=('A',) if cfg == 'A' else ('C',) if cfg == 'C' else ('F',))
-            off = LimBDDOracleSynthesizer(m2_post=False, **kwargs)
-            on = LimBDDOracleSynthesizer(m2_post=True, **kwargs)
+            off = OracleSynthesizer(m2_post=False, **kwargs)
+            on = OracleSynthesizer(m2_post=True, **kwargs)
             for fn in data:
                 tt = TruthTable(fn, n)
                 t0 = time.perf_counter()
@@ -49,7 +48,7 @@ def main():
                 on.synthesize(tt)
                 acc[f'{cfg}_on_wall'] += time.perf_counter() - t0
                 t_on, cx_on = count_costs(to_qiskit(on.circ))
-                assert on.circ.verify(tt), f'[{cfg}] M2 发射验证失败: tt={fn}'
+                assert on.circ.verify(tt), f'[{cfg}] M2 emission verification failed: tt={fn}'
 
                 acc[f'{cfg}_T_off'] += t_off
                 acc[f'{cfg}_T_on'] += t_on
@@ -63,15 +62,15 @@ def main():
             t0, t1 = acc[f'{cfg}_T_off'], acc[f'{cfg}_T_on']
             c0, c1 = acc[f'{cfg}_CX_off'], acc[f'{cfg}_CX_on']
             dt = f'{(t1/t0-1):+.2%}({acc[f"{cfg}_T_better"]}/{cases})' if t0 else 'n/a'
-            dc = f'{(c1/c0-1):+.2%}(优{acc[f"{cfg}_CX_better"]}劣{acc[f"{cfg}_CX_worse"]}/{cases})' if c0 else 'n/a'
+            dc = f'{(c1/c0-1):+.2%}(better{acc[f"{cfg}_CX_better"]}worse{acc[f"{cfg}_CX_worse"]}/{cases})' if c0 else 'n/a'
             wall = (acc[f'{cfg}_on_wall'] - acc[f'{cfg}_off_wall']) / cases * 1e3
             msg.append(f'{cfg:>3}  ΣT: {t0}→{t1} ({dt})   ΣCX: {c0}→{c1} ({dc})   '
-                       f'M2增量 {max(wall,0):.2f} ms/例')
+                       f'M2 delta {max(wall,0):.2f} ms/case')
         print('\n'.join(msg), flush=True)
         lines += msg + ['']
     with open(OUT, 'w') as f:
         f.write('\n'.join(lines) + '\n')
-    print(f'\n结果已写入 {OUT}')
+    print(f'\nresults written to {OUT}')
 
 
 if __name__ == '__main__':

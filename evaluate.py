@@ -3,8 +3,8 @@ import time
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
 from config import config
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.fusion.BranchFusion import anf_degree
+from backend.OracleSynthesizer import OracleSynthesizer
+from backend.fusion.BranchFusion import anf_degree
 from utils.TruthTable import TruthTable
 from utils.to_qiskit import to_qiskit
 
@@ -14,9 +14,9 @@ CX_COST_FN = config['cx_cost']
 
 def count_costs(circ):
     """
-    电路 (T, CX) 代价。口径与 data/exorcism_cost.py / sshr 数据一致:
-      MCX/CCX 按其控制数 k 计 T_COST_FN(k) 与 CX_COST_FN(k);
-      显式 CX 门计 1 个 CX;X 门免费。
+    Circuit (T, CX) cost. The scope matches data/exorcism_cost.py / sshr data:
+      MCX/CCX are charged T_COST_FN(k) and CX_COST_FN(k) by their control count k;
+      an explicit CX gate counts as 1 CX; X gates are free.
     """
     t = cx = 0
     for instruction in circ.data:
@@ -38,28 +38,28 @@ def count_costs(circ):
 
 
 def count_t_cost(circ):
-    """仅 T 口径（兼容既有调用方）。"""
+    """T-only scope (compatible with existing callers)."""
     return count_costs(circ)[0]
 
 
 def count_cx_cost(circ):
-    """仅 CX 口径。"""
+    """CX-only scope."""
     return count_costs(circ)[1]
 
 
 def paths_tag(paths, fprm_proxy, gl_search):
-    """路径标签(输出文件名用):gl → 'G';单路径 A/C/F;fprm_proxy 且 F → 'FP'。"""
+    """Path label (used in output file names): gl → 'G'; single path A/C/F; fprm_proxy with F → 'FP'."""
     if gl_search:
         return 'G'
     p = paths[0] if isinstance(paths, (tuple, list)) else paths
-    assert p in ('A', 'C', 'F'), f'非法 paths(当前阶段仅允许单路径 A/C/F): {paths}'
+    assert p in ('A', 'C', 'F'), f'illegal paths (only the single paths A/C/F are allowed at this stage): {paths}'
     return 'FP' if (fprm_proxy and p == 'F') else p
 
 
 def load_aligned(cases_path, cost_path, start, stop):
     """
-    读测试用例与逐例基线代价（按行号对齐）。
-    返回 (cases, costs);cost_path 不存在或为空时 costs=None（如 sshr n≥7 留空）。
+    Read test cases and per-case baseline costs (aligned by line number).
+    Returns (cases, costs); costs=None when cost_path is missing or empty (e.g. sshr left empty for n≥7).
     """
     with open(cases_path) as f:
         lines = f.readlines()
@@ -78,9 +78,9 @@ def load_aligned(cases_path, cost_path, start, stop):
 
 
 def _compare(name, cases, ours, baseline):
-    """单口径对比;baseline 为 None 时跳过。返回报告行列表。"""
+    """Single-scope comparison; skipped when baseline is None. Returns a list of report lines."""
     if baseline is None:
-        return [f"===== {name}:基线缺失,跳过 ====="]
+        return [f"===== {name}:baseline missing, skipped ====="]
     better, worse, same = 0, 0, 0
     worse_cases = []
     s_base = s_ours = 0
@@ -103,34 +103,34 @@ def _compare(name, cases, ours, baseline):
         f"same   cost in {same}({same / len(cases) * 100}%) cases",
         f"cases with higher cost: {worse_cases[:min(len(worse_cases), 20)]}",
         f"total cost: baseline {s_base}, ours {s_ours} "
-        f"(缩减 {1 - s_ours / max(1, s_base):.2%})",
+        f"(reduction {1 - s_ours / max(1, s_base):.2%})",
     ]
 
 
 def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
                  fprm_proxy=False, paths=('F',), m2_post=True):
     """
-    融合后端与 Exorcism / SSHR 的对比（T 与 CX 双口径）。
+    Comparison of the fused backend against Exorcism / SSHR (T and CX dual scopes).
 
-    gl_search=True   : 启用 G-2.2 确定性 GL 搜索（时间换质量,n=7 约 +6s/例）。
-    fprm_proxy=True  : 方案 A——F 路径由免融合代理预筛版**取代**(选择关系,
-                       非 min;n≥9 意图升级平移 climb2)。
-    paths            : 单路径选择(探索期纪律,默认 'F';仅允许 'A'/'C'/'F',
-                       多路径组合在本阶段禁用;FP/G 经开关选择)。
-    m2_post=True     : 宏 M2 相间后处理(**默认开启**;T 端逐例零回归,n≤7 全量
-                       测例 CX 劣化 0 例;m2=0 仅调试用,输出文件与默认口径
-                       同名,勿与正式数据混用)。
-    输出文件按路径组合分目录名:`data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
-    tag = paths_tag(paths, fprm_proxy, gl_search)(2025-08-22 起不再区分 M2:
-    融合后端默认 M2 强化,历史数据将重跑)。
+    gl_search=True   : enable the G-2.2 deterministic GL search (time for quality, about +6s/case at n=7).
+    fprm_proxy=True  : Plan A — the F path is **replaced** by the fusion-free proxy-prescreened version
+                       (a choice relationship, not a min; for n≥9 the intent is to upgrade to shift climb2).
+    paths            : single-path choice (exploration-phase discipline, default 'F'; only 'A'/'C'/'F'
+                       are allowed, multi-path combinations are disabled at this stage; FP/G are selected via flags).
+    m2_post=True     : macro M2 interleaved post-processing (**enabled by default**; zero regression on the T side
+                       case by case, 0 CX degradations across all n≤7 test cases; m2=0 is for debugging only and
+                       writes output files with the same names as the default scope, so do not mix it with official data).
+    Output files are named by path combination: `data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
+    tag = paths_tag(paths, fprm_proxy, gl_search) (since 2025-08-22 M2 is no longer distinguished:
+    the fused backend defaults to M2 strengthening, and historical data will be re-run).
 
-    数据布局（2025-08-22 更新）：
-      测例     data/test_cases/test_cases_{n}（每行一个真值表整数）
-      基线     data/exorcism_cost/exorcism_{t,cx}_cost_{n}、data/sshr_cost/sshr_{t,cx}_cost_{n}
-      （按行号与测例对齐;sshr n≥7 暂空 → 自动跳过该对比）
-    输出:
-      data/our_cost/our_{t,cx}_cost_{n}_{start}_{stop}.txt、
-      data/our_cost/our_deg_bound_{n}_{start}_{stop}.txt（G-3 下界）
+    Data layout (updated 2025-08-22):
+      test cases  data/test_cases/test_cases_{n} (one truth-table integer per line)
+      baselines   data/exorcism_cost/exorcism_{t,cx}_cost_{n}, data/sshr_cost/sshr_{t,cx}_cost_{n}
+      (aligned with test cases by line number; sshr n≥7 is temporarily empty → that comparison is skipped automatically)
+    Outputs:
+      data/our_cost/our_{t,cx}_cost_{n}_{start}_{stop}.txt,
+      data/our_cost/our_deg_bound_{n}_{start}_{stop}.txt (G-3 lower bound)
     """
     cases_path = f'data/test_cases/test_cases_{num_var}'
     with open(cases_path) as f:
@@ -143,7 +143,7 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     _, sshr_t = load_aligned(cases_path, f'data/sshr_cost/sshr_t_cost_{num_var}', start, stop)
     _, sshr_cx = load_aligned(cases_path, f'data/sshr_cost/sshr_cx_cost_{num_var}', start, stop)
 
-    synthesizer = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=num_anc,
+    synthesizer = OracleSynthesizer(reorder=reorder, ancilla_num=num_anc,
                                           fused_backend=True, gl_search=gl_search,
                                           fprm_proxy=fprm_proxy, paths=paths,
                                           m2_post=m2_post)
@@ -179,13 +179,13 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     avg_wall_ms = wall_ns / max(total, 1) / 1e6
     report = [f"****** Comparison of TDD-based Method Alg. 1 (fused backend) ******",
               f"number of input variables: {num_var} ({total} cases); paths={tag}",
-              f"avg synthesize wall: {avg_wall_ms:.2f} ms/例"]
+              f"avg synthesize wall: {avg_wall_ms:.2f} ms/case"]
     report += _compare("Exorcism T", cases, ours_t, exor_t)
     report += _compare("Exorcism CX", cases, ours_cx, exor_cx)
     report += _compare("SSHR T", cases, ours_t, sshr_t)
     report += _compare("SSHR CX", cases, ours_cx, sshr_cx)
-    report.append(f"G-3 下界: Σ t(deg f) = {sum(bounds)} "
-                  f"(为 ours ΣT 的 {sum(bounds) / max(1, sum(ours_t)):.2%})")
+    report.append(f"G-3 lower bound: Σ t(deg f) = {sum(bounds)} "
+                  f"({sum(bounds) / max(1, sum(ours_t)):.2%} of ours ΣT)")
     report.append("****** ****** ******")
 
     text = '\n'.join(report) + '\n'
@@ -204,11 +204,11 @@ def main():
     proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
     paths   = sys.argv[8] if len(sys.argv) >= 9 else 'F'
     m2      = int(sys.argv[9]) if len(sys.argv) >= 10 else 1
-    assert paths in ('A', 'C', 'F'), f'非法 paths(仅允许 A/C/F 单路径): {paths}'
-    assert m2 in (0, 1), f'非法 m2 开关(0/1): {m2}'
+    assert paths in ('A', 'C', 'F'), f'illegal paths (only single paths A/C/F allowed): {paths}'
+    assert m2 in (0, 1), f'illegal m2 switch (0/1): {m2}'
 
     if num_anc != 0:
-        print('Warning: fused_backend 仅在 ancilla_num=0 时生效（当前 anc>0，将走旧路径）。')
+        print('Warning: fused_backend only takes effect when ancilla_num=0 (currently anc>0, the old path will be used).')
 
     evaluate_all(num_var, reorder > 0, num_anc, start, stop, gl_search=gl > 0,
                  fprm_proxy=proxy > 0, paths=paths, m2_post=m2 > 0)

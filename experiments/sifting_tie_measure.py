@@ -1,30 +1,29 @@
 """
-sifting 结点数平局占比量测（支撑 A1 方向：平局时用融合 ΣT 决胜的收益上限）。
+Measure the share of sifting node-count ties (supporting direction A1: the upper bound on the gain from breaking ties with fusion ΣT).
 
-复刻 reorder_proxy_measure 的决策循环（无融合评分），统计每个决策段（第二段）
-pass2 中：
-  - 结点数并列候选（node_num == min node）占比；
-  - 结点数 + 分支数双并列候选（现行平局规则下真正可能改变选择的候选）占比。
+Replicate the decision loop of reorder_proxy_measure (no fusion scoring), and for each decision segment (the second segment) pass2 count:
+  - the share of candidates tied on node count (node_num == min node);
+  - the share of candidates tied on both node count and branch count (the candidates that can actually change the choice under the current tie rule).
 
-用法: ./venv/bin/python experiments/sifting_tie_measure.py [n ...]   默认 8 9 10
+Usage: ./venv/bin/python experiments/sifting_tie_measure.py [n ...]   default 8 9 10
 """
 import os
 import random
 import sys
 
-# 项目根目录（脚本位于 experiments/ 下，故上溯一级）；加入 sys.path 保证 limbdd/utils 可导入
+# Project root (the script lives under experiments/, so go up one level); add to sys.path so limbdd/utils can be imported
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
+from backend.OracleSynthesizer import OracleSynthesizer
 from utils.TruthTable import TruthTable
 
 CASES = {8: 5, 9: 5, 10: 3}
 
 
 def swap_pass(mgr, limbdd, current_level, target_level, records):
-    """复刻 swap_to_level 的移动与 min 跟踪（分支数平局），records 记录决策段位置。"""
+    """Replicate swap_to_level's moves and min tracking (branch-count tie), records stores decision-segment positions."""
     current_node_num, min_node_num, min_level = 0, 0, current_level
     min_branch_count = limbdd.branch_count(limbdd.root.node, cache={})
 
@@ -57,7 +56,7 @@ def swap_pass(mgr, limbdd, current_level, target_level, records):
 
 
 def measure_case(tt, n):
-    syn = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
+    syn = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
     syn.construct(tt)
     mgr = syn.limbdd_mgr
     mgr.try_neg(mgr.limbdd)
@@ -75,7 +74,7 @@ def measure_case(tt, n):
 
     mid_level = top_level >> 1
     cands = sorted(range(1, top_level + 1), key=lambda l: len(limbdd.level2nodes[l]))
-    stats = []  # (决策段位置数, 结点数并列数, 结点+分支双并列数)
+    stats = []  # (decision-point count, node-tie count, node+branch double-tie count)
     while cands:
         start = cands.pop()
         recs = []
@@ -94,7 +93,7 @@ def measure_case(tt, n):
             node_ties = sum(1 for r in pass2 if r[1] == mn)
             both_ties = sum(1 for r in pass2 if r[1] == mn and r[2] == mn_bc)
             stats.append((len(pass2), node_ties, both_ties))
-        # 第三段回位（维持管线状态，与 proxy 相同）
+        # Third segment returns to position (maintain pipeline state, same as proxy)
         final, _ = swap_pass(mgr, limbdd, cur, min_level, recs)
         if final > start:
             for i in range(len(cands)):
@@ -126,10 +125,10 @@ def main():
             tot_pos += npos
             tot_node += nnode
             tot_both += nboth
-            print(f'n={n} case {s}: 决策点 {npos}, 结点并列 {nnode} ({nnode / max(1, npos):.0%}), '
-                  f'结点+分支双并列 {nboth} ({nboth / max(1, npos):.0%})', flush=True)
-        print(f'n={n} SUM: {tot_pos} 决策点, 结点并列 {tot_node / max(1, tot_pos):.1%}, '
-              f'双并列 {tot_both / max(1, tot_pos):.1%}\n', flush=True)
+            print(f'n={n} case {s}: decision points {npos}, node ties {nnode} ({nnode / max(1, npos):.0%}), '
+                  f'node+branch double ties {nboth} ({nboth / max(1, npos):.0%})', flush=True)
+        print(f'n={n} SUM: {tot_pos} decision points, node ties {tot_node / max(1, tot_pos):.1%}, '
+              f'double ties {tot_both / max(1, tot_pos):.1%}\n', flush=True)
 
 
 if __name__ == '__main__':

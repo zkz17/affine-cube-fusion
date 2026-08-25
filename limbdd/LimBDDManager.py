@@ -4,7 +4,7 @@ from limbdd.Lim import Lim
 from limbdd.Node import LimBDDNode, LimBDDSignal
 from limbdd.LimBDD import LimBDD, SimpleBranch
 
-# 向后兼容别名（过渡期：旧 notebook 以 Branch 从本模块导入；后续阶段移除）
+# Backward-compatibility alias (transitional: old notebooks import Branch from this module; remove in a later phase)
 Branch = SimpleBranch
 from limbdd.patterns.SplitPattern import SplitPattern
 
@@ -59,9 +59,9 @@ class LimBDDManager:
         for other_limbdd in self.limbdd_list[level]:
             if not other_limbdd.root.weight: continue
             self.perform_split(other_limbdd)
-            # 已定结论(2025-08-22,bdd_path_conclusions.md (1)):try_absorb_branch 已移除——
-            # 它只做 C1 抵消,而全局融合引擎 fuse_pool_global 无条件覆盖 C1;
-            # P4 实测其单独效应严格为零(±8 噪声级)。函数本体保留于本模块供研究。
+            # Established conclusion (2025-08-22, docs/architecture.md (1)): try_absorb_branch has been removed --
+            # it only performs C1 cancellation, while the global fusion engine fuse_pool_global covers C1 unconditionally;
+            # P4 measurements show its standalone effect is exactly zero (±8 noise level). The function body stays in this module for research.
             if not limbdd.root.weight: break
     
     def try_neg(self, limbdd):

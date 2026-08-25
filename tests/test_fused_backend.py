@@ -1,8 +1,8 @@
 from random import randint
 
 from utils.TruthTable import TruthTable
-from limbdd.LimBDDOracleSynthesizer import LimBDDOracleSynthesizer
-from limbdd.fusion.FusedBackend import limbdd2circ_fused
+from backend.OracleSynthesizer import OracleSynthesizer
+from limbdd.FusedBackend import limbdd2circ_fused
 from utils.to_qiskit import to_qiskit
 from experiments.phase0_branch_stats import count_t_cost
 from tests.test_complete_branch import prepare_pieces
@@ -13,11 +13,11 @@ def random_tt(num_vars):
 
 
 def _synth_pair(tt, reorder):
-    old = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=False)
-    # 注(2025-08-22):多路径组合在本阶段禁用;本测试验证**A 路径融合后端**
-    # 对旧后端的零劣化——融合只降不升,且旧后端发射代价 = 原始池 ΣT,
-    # 故 paths=('A',) 的融合代价逐例 ≤ 旧后端。
-    new = LimBDDOracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True,
+    old = OracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=False)
+    # Note (2025-08-22): multi-path combinations are disabled at this stage; this test verifies that the
+    # **A-path fused backend** is no worse than the old backend — fusion only lowers or keeps T, and the
+    # old backend emission cost = raw pool ΣT, so the fused cost with paths=('A',) is ≤ the old backend case by case.
+    new = OracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True,
                                   paths=('A',))
     old.synthesize(tt)
     new.synthesize(tt)
@@ -25,18 +25,18 @@ def _synth_pair(tt, reorder):
 
 
 def test_backend_equivalence(num_vars=5, rounds=300, verbose=False):
-    """新旧后端差分：逐例 compute_tt 一致、T 不升；汇总统计。"""
+    """Old/new backend differential: per-case compute_tt agreement, T not increased; summary statistics."""
     print(f'Testing fused backend equivalence with {rounds} random {num_vars}-input functions...')
 
     t_old_sum, t_new_sum = 0, 0
     for i in range(rounds):
         tt = random_tt(num_vars)
         old, new = _synth_pair(tt, reorder=(i % 2 == 1))
-        assert old.circ.verify(tt), f'旧后端验证失败: {tt}'
-        assert new.circ.verify(tt), f'新后端验证失败: {tt}'
+        assert old.circ.verify(tt), f'old backend verification failed: {tt}'
+        assert new.circ.verify(tt), f'new backend verification failed: {tt}'
         t_old = count_t_cost(to_qiskit(old.circ))
         t_new = count_t_cost(to_qiskit(new.circ))
-        assert t_new <= t_old, f'新后端 T 上升: {t_old} -> {t_new} (tt={tt})'
+        assert t_new <= t_old, f'new backend T increased: {t_old} -> {t_new} (tt={tt})'
         t_old_sum += t_old
         t_new_sum += t_new
         if verbose:
@@ -47,7 +47,7 @@ def test_backend_equivalence(num_vars=5, rounds=300, verbose=False):
 
 
 def test_simplify_preserves_semantics(num_vars=5, rounds=100, verbose=False):
-    """simplify_terms：保语义（compute_tt 不变）且项数不增。"""
+    """simplify_terms: preserves semantics (compute_tt unchanged) and does not increase the term count."""
     print(f'Testing term simplification with {rounds} random {num_vars}-input functions...')
 
     for i in range(rounds):
@@ -63,8 +63,8 @@ def test_simplify_preserves_semantics(num_vars=5, rounds=100, verbose=False):
             circ.simplify_terms()
             after_tt = circ.compute_tt()
             n_after = sum(len(stg.ctrl_seq.term_list) for stg in circ.gate_sequence)
-            assert after_tt == before_tt, f'简化破坏语义: tt={tt}'
-            assert n_after <= n_before, f'简化后项数增加: {n_before} -> {n_after}'
+            assert after_tt == before_tt, f'simplification broke semantics: tt={tt}'
+            assert n_after <= n_before, f'simplification increased the term count: {n_before} -> {n_after}'
             if verbose:
                 print('  ', i, str(tt), f'terms {n_before} -> {n_after}')
 
@@ -72,7 +72,7 @@ def test_simplify_preserves_semantics(num_vars=5, rounds=100, verbose=False):
 
 
 def test_differential_stats_larger(num_vars=6, rounds=60, verbose=False):
-    """n=6 差分统计样本（覆盖率 + 收益量级）。"""
+    """n=6 differential statistics sample (coverage + gain magnitude)."""
     print(f'Testing fused backend statistics with {rounds} random {num_vars}-input functions...')
 
     t_old_sum, t_new_sum = 0, 0
@@ -82,7 +82,7 @@ def test_differential_stats_larger(num_vars=6, rounds=60, verbose=False):
         assert old.circ.verify(tt) and new.circ.verify(tt)
         t_old = count_t_cost(to_qiskit(old.circ))
         t_new = count_t_cost(to_qiskit(new.circ))
-        assert t_new <= t_old, f'新后端 T 上升: {t_old} -> {t_new} (tt={tt})'
+        assert t_new <= t_old, f'new backend T increased: {t_old} -> {t_new} (tt={tt})'
         t_old_sum += t_old
         t_new_sum += t_new
         if verbose:
@@ -93,29 +93,30 @@ def test_differential_stats_larger(num_vars=6, rounds=60, verbose=False):
 
 
 def test_flag_fallback(num_vars=5, rounds=20):
-    """ancilla_num>0 时 fused_backend 开关不生效（走旧路径，无回归）。"""
+    """When ancilla_num>0 the fused_backend flag has no effect (old path is used, no regression)."""
     print(f'Testing fused_backend flag fallback with {rounds} random {num_vars}-input functions...')
 
     ok = 0
     for i in range(rounds):
         tt = random_tt(num_vars)
-        syn = LimBDDOracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=1, fused_backend=True)
+        syn = OracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=1, fused_backend=True)
         try:
             syn.synthesize(tt)
             assert syn.circ.verify(tt)
             ok += 1
         except Exception:
-            pass  # ancilla=1 路径存在已知缺陷（pivot），仅统计成功例
+            pass  # the ancilla=1 path has a known defect (pivot); only count successful cases
     assert ok > 0
     print(f'Fused backend flag fallback test passed!!! ({ok}/{rounds} verified)')
 
 
 def test_input_allocation_regression():
-    """回归(2025-08-22):融合后端跳过 construct 时输入量子位曾惰性缺失。
+    """Regression (2025-08-22): when the fused backend skipped construct, input qubits used to be lazily missing.
 
-    例 fn=64560(n=4):F 路径 cF=0 且首段只用 qubit 1/2/3,qubit 0 从未分配,
-    compute_tt 在 3 变量空间枚举,发射电路 tt 错位(输出 0)。现 synthesize
-    在融合路径入口显式分配全部输入量子位。
+    Example fn=64560 (n=4): the F path has cF=0 and the first segment only uses qubits 1/2/3,
+    qubit 0 is never allocated, compute_tt enumerates in a 3-variable space, and the emitted
+    circuit's tt is misaligned (outputs 0). synthesize now explicitly allocates all input qubits
+    at the fused-path entry.
     """
     print('Testing fused backend input allocation regression...')
 
@@ -123,10 +124,10 @@ def test_input_allocation_regression():
     for cfg in ((False, False, ('F',)), (False, False, ('A',)),
                 (False, False, ('C',)), (False, True, ('F',)), (True, False, ('F',))):
         gl, proxy, paths = cfg
-        s = LimBDDOracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
+        s = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                     gl_search=gl, fprm_proxy=proxy, paths=paths)
         s.synthesize(tt)
-        assert s.circ.verify(tt), f'输入分配回归: 配置 {cfg} 发射 tt 错位'
+        assert s.circ.verify(tt), f'input allocation regression: config {cfg} emitted a misaligned tt'
     print('Fused backend input allocation regression test passed!!!')
 
 
