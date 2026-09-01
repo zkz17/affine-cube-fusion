@@ -2,6 +2,12 @@
 """
 CompleteBranch: the complete information of one branch (compressed representation).
 
+Naming note (2025-08): in the paper this object is called **Affine Block** -- the two names
+denote the same concept. The algebraic essence is independent of the BDD lineage: an affine
+block is the indicator function of an affine subspace S = base + span(basis), together with
+its canonical emission plan (X/CNOT network + one MCX + inverse network); see
+docs/CompleteBranch_algebra.md (Theorem 1, Theorem 3').
+
 Design: docs/architecture.md (2025-08 revision).
 
 Primary data (immutable; absolute variable bit space, bit k = variable k):

@@ -21,6 +21,8 @@ backend/                     合成器与融合引擎
   OracleSynthesizer.py       OracleSynthesizer（原 LimBDDOracleSynthesizer）——五路径总入口
   CompleteBranch.py          CompleteBranch / SyntheticPlan / plan_from_affine / plan_min_cx /
                              t_cost / rref / reduce_basis / in_span / is_affine_cube / affine_from_fn
+                             【命名注：CompleteBranch 与论文术语 **Affine Block（仿射块）**
+                             为同一概念的两个名称，见 CompleteBranch_algebra.md 卷首注】
   fusion/
     BranchFusion.py          池融合入口：fuse_pool_global / fuse_pool / pool_t_cost /
                              anf_pool / anf_degree / shift_fn / four_case_kind
