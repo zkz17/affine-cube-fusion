@@ -1,0 +1,29 @@
+****** Comparison of TDD-based Method Alg. 1 (fused backend) ******
+number of input variables: 6 (10000 cases); paths=G
+avg synthesize wall: 1051.57 ms/例
+===== Exorcism T =====
+lower  cost in 10000(100.0%) cases
+higher cost in 0(0.0%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: []
+total cost: baseline 2496833, ours 1247903 (缩减 50.02%)
+===== Exorcism CX =====
+lower  cost in 9998(99.98%) cases
+higher cost in 1(0.01%) cases
+same   cost in 1(0.01%) cases
+cases with higher cost: [2830303326469330852]
+total cost: baseline 1955982, ours 1235671 (缩减 36.83%)
+===== SSHR T =====
+lower  cost in 9991(99.91%) cases
+higher cost in 6(0.06%) cases
+same   cost in 3(0.03%) cases
+cases with higher cost: [1307535853387514717, 8993927174052841413, 6112599467338648788, 10328122041974339760, 111928104835166139, 975270023675661066]
+total cost: baseline 2013118, ours 1247903 (缩减 38.01%)
+===== SSHR CX =====
+lower  cost in 9978(99.78%) cases
+higher cost in 20(0.2%) cases
+same   cost in 2(0.02%) cases
+cases with higher cost: [15239936212879507935, 1307535853387514717, 2160013277262651810, 8993927174052841413, 6112599467338648788, 10328122041974339760, 13225399971158000161, 111928104835166139, 3011767386984305782, 9986967329828619568, 975270023675661066, 16265058780322522506, 349515244561332985, 635695850673474666, 14989721483207975999, 17305932227347710287, 9339034548981348900, 10706846962228138200, 10348263953368297216, 10090634856630121741]
+total cost: baseline 1901114, ours 1235671 (缩减 35.00%)
+G-3 下界: Σ t(deg f) = 349264 (为 ours ΣT 的 27.99%)
+****** ****** ******
