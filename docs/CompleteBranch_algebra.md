@@ -41,7 +41,7 @@
   it collides with `1_V` (support V, dim n), breaking the "dim ↔ support" injection and all the cardinality
   arguments of Theorem 2; if we set it to −∞, the operational form of `|S| = 2^k` breaks. Thus −1 is the
   only choice that preserves the integrity of those two formulas.
-- **Affine block (affine block = the code's CompleteBranch)**: an involution circuit on the data
+- **Affine Block (= the code's CompleteBranch)**: an involution circuit on the data
   register
   `X network · CNOT network · MCX(C, p) · CNOT inverse network · X network`, where **the MCX may be omitted**;
   when omitted the circuit is empty and is called the **zero block**, realizing the zero function with
@@ -105,10 +105,10 @@ i+1). Level by level:
 
 **Theorem 1**:
 
-1. **Necessity (⟹)**: the flip function of every affine block is an affine cube function; moreover, the
-   support dimension of the flip function of an m-controlled (MCX control count m) affine block is exactly
+1. **Necessity (⟹)**: the flip function of every Affine Block is an affine cube function; moreover, the
+   support dimension of the flip function of an m-controlled (MCX control count m) Affine Block is exactly
    `n − m`; the MCX is omitted (zero block) iff the flip function is ≡ 0 (zero cube, dim = −1).
-2. **Sufficiency (⟸)**: every affine cube function can be realized by an affine block: `dim = −1` corresponds
+2. **Sufficiency (⟸)**: every affine cube function can be realized by an Affine Block: `dim = −1` corresponds
    to the zero block; `dim = k ≥ 0` corresponds to the RREF canonical construction of §3.6, with MCX control
    count exactly `n − k`.
 
@@ -129,7 +129,7 @@ over GF(2): when `x_c = p` the right side is 1, otherwise 0), hence
 the algebraic origin of the §6.2 sandwich requirement.
 
 **(1) Complete proof of necessity**:
-1. Let N be the data-network prefix of an affine block B (a product of X/CNOT/conditional flips). By Lemma 1.3.a
+1. Let N be the data-network prefix of an Affine Block B (a product of X/CNOT/conditional flips). By Lemma 1.3.a
    and Corollary 1.3.b, `N(x) = Lx ⊕ b`, `L ∈ GL(n,2)` (a product of affine maps is affine; each factor
    invertible ⇒ L invertible), and the suffix in the emission semantics is exactly `N⁻¹`. Thus the net effect
    of the whole block on the register = `N · MCX · N⁻¹`.
@@ -173,11 +173,11 @@ the algebraic origin of the §6.2 sandwich requirement.
    `y_f = x_f ⊕ Σ_{p: (r_p)_f=1} x_p = x_f ⊕ Σ_{p∈P} (r_p)_f x_p`.
    Then apply the MCX with control set F and polarities `c_f`: it flips the target ⟺ `y_f = c_f` (∀f) ⟺
    `x ∈ a + K`. Repeating the CNOTs in reverse order (Corollary 1.3.b) restores the input, yielding a legal
-   affine block with control count `m = |F| = n − |P| = n − k`. ∎
+   Affine Block with control count `m = |F| = n − |P| = n − k`. ∎
 
 **(i) Minimal control count (secondary conclusion, and stronger than the earlier statement: it is an
 equality, not merely a lower bound)**: first define the extended cost
-`t̄(dim) := t(n − dim)` (dim ≥ 0), `t̄(−1) := 0`. Then for dim = k ≥ 0: by necessity, any affine block
+`t̄(dim) := t(n − dim)` (dim ≥ 0), `t̄(−1) := 0`. Then for dim = k ≥ 0: by necessity, any Affine Block
 realizing the function satisfies `n − m = k`, i.e. **m = n − k is forced**, and the single-block T cost
 `T = t(n − k) = t̄(k)`. For dim = −1 (f ≡ 0): only the zero block can realize it, **the MCX is omitted and m
 is undefined** (the control-count formula `m = n − k` does not apply to this case; do not write
