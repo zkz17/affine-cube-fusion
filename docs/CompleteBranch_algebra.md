@@ -825,12 +825,12 @@ coordinates into two composite coordinates, the MCX control count is determined 
 14. (2025-08 addition) §4.4 pairwise-completeness conjecture: derivation of the covering lemma, the
     reduction lemma, the 2-adic valuation lemma and the proved subcases; the list of unclosed cases; the
     search data of Appendix F.
-15. (2025-08 addition) §1.4 translation sensitivity: cross-piece fusion must re-decide on the shifted d'
+14. (2025-08 addition) §1.4 translation sensitivity: cross-piece fusion must re-decide on the shifted d'
     (the coset-position conditions of C3/C4 are translation-sensitive; K invariance is only part of the
     necessary condition).
-16. (2025-08 addition) §2.3 mapping table: correspondence of code `four_case_kind` 1–4 with C1–C4 (3/4 are
+15. (2025-08 addition) §2.3 mapping table: correspondence of code `four_case_kind` 1–4 with C1–C4 (3/4 are
     mirrors), authoritative decision = direct decision.
-17. (2025-08 addition) §3.8 gate-level merge identities: the semantics-preserving conditions of the three
+16. (2025-08 addition) §3.8 gate-level merge identities: the semantics-preserving conditions of the three
     LimTerm merge rules (especially "the flip bits do not include the control bit") and the reason not to
     merge ControlTerm.
 
