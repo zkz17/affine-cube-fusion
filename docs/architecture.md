@@ -1,259 +1,304 @@
-# 整体框架设计（系统当前状态）
+# System Architecture (current state)
 
-> 本文档整合原 `docs/` 中散落的工作计划与进展记录，只保留**当前系统真实状态**的
-> 设计参考。历史工作日志、已放弃方案与验收计划均已删除，不再维护。
+> This document is the design reference for the **current state** of the system. It records the
+> module layout, the synthesis pipelines, the fusion engine, the cost model and the data layout;
+> it does not restate any proofs.
 >
-> 数学细节仍以以下三份文档为准，本文不重述证明：
-> - `docs/CompleteBranch_algebra.md` —— CompleteBranch 仿射立方代数、定理 2（C1–C4）与规范构造；
-> - `docs/exorlink_unification.md` —— exorlink-δ 统一池重写理论（split / 融合 / 对旋转的关系）；
-> - `docs/macro_m2_theory.md` —— 宏 M2（Π 中性对 + 有界恶化推广）的形式化。
+> The mathematics lives in `docs/CompleteBranch_algebra.md` (affine-block algebra, Theorem 1,
+> the C1–C4 classification of Theorem 2, and the canonical construction). In particular, the code
+> object `CompleteBranch` and the paper term **Affine Block** denote the same concept.
 >
-> 本文所有路径、类名与开关以 2025-08-24 之后的仓库为准：类 `LimBDDOracleSynthesizer`
-> 已更名 `OracleSynthesizer`，`limbdd/fusion/` 与 `limbdd/CompleteBranch.py` 已迁至
-> `backend/`。
+> All paths, class names and switches below follow the current repository: the class
+> `LimBDDOracleSynthesizer` was renamed `OracleSynthesizer`, and `limbdd/fusion/` together with
+> `limbdd/CompleteBranch.py` moved under `backend/`.
 
 ---
 
-## 1. 模块布局（重构后）
+## 1. Module layout
 
 ```
-backend/                     合成器与融合引擎
-  OracleSynthesizer.py       OracleSynthesizer（原 LimBDDOracleSynthesizer）——五路径总入口
+backend/                     synthesizer and fusion engine
+  OracleSynthesizer.py       OracleSynthesizer (formerly LimBDDOracleSynthesizer): entry point of the five paths
   CompleteBranch.py          CompleteBranch / SyntheticPlan / plan_from_affine / plan_min_cx /
                              t_cost / rref / reduce_basis / in_span / is_affine_cube / affine_from_fn
-                             【命名注：CompleteBranch 与论文术语 **Affine Block（仿射块）**
-                             为同一概念的两个名称，见 CompleteBranch_algebra.md 卷首注】
+                             (CompleteBranch == the paper's "Affine Block")
   fusion/
-    BranchFusion.py          池融合入口：fuse_pool_global / fuse_pool / pool_t_cost /
+    BranchFusion.py          pool-fusion entry: fuse_pool_global / fuse_pool / pool_t_cost /
                              anf_pool / anf_degree / shift_fn / four_case_kind
-    ClosedForm.py            闭式判定与构造：canonical_affine / fuse_closed / closed_gain
-    GLSearch.py              G 选项：gl_search / fprm_best / apply_linear / climb_best
-    FprmProxy.py             FP 选项：proxy_scores / fprm_proxy_best
-    MacroM2.py               宏 M2 后处理：m2_best_move / m2_interleaved / h_candidates
-limbdd/                      BDD 核心与抽取
+    ClosedForm.py            closed-form decision and construction: canonical_affine / fuse_closed / closed_gain
+    GLSearch.py              option G: gl_search / fprm_best / apply_linear / climb_best
+    FprmProxy.py             option FP: proxy_scores / fprm_proxy_best
+    MacroM2.py               macro M2 post-processing: m2_best_move / m2_interleaved / h_candidates
+limbdd/                      BDD core and extraction
   Node.py / Lim.py / LimBDD.py / LimBDDManager.py
-  patterns/                  SplitPattern / SplitLv2Pattern / SplitInterceptorPattern（split 模式）
-  Extraction.py              abs_lim / extract_complete_branches（子图 → CompleteBranch 池）
-  FusedBackend.py            limbdd2circ_fused（单子图融合发射，Phase 4 遗留入口）
+  patterns/                  SplitPattern / SplitLv2Pattern / SplitInterceptorPattern (split patterns)
+  Extraction.py              abs_lim / extract_complete_branches (subgraph -> affine-block pool)
+  FusedBackend.py            limbdd2circ_fused (single-subgraph fused emission, legacy entry)
 circuit/
   MCXCircuit.py              MCXCircuit / STGate / order_segments_greedy / simplify_terms /
                              simplify_term_list / boundary_cx_savings
-  Control.py                 Control / CtrlSequence（ControlTerm / LimTerm）
+  Control.py                 Control / CtrlSequence (ControlTerm / LimTerm)
 utils/
   Qubit.py                   Qubit / QubitManager
   TruthTable.py              TruthTable
-  to_qiskit.py               MCXCircuit → Qiskit 电路（evaluate.py 计费用）
-config.py                    t_cost / cx_cost 单一事实源（§4）
-evaluate.py / test.py        评测入口 / 测试入口
+  to_qiskit.py               MCXCircuit -> Qiskit circuit (used by evaluate.py for cost counting)
+config.py                    single source of truth for t_cost / cx_cost (see §4)
+evaluate.py / test.py        evaluation entry / test entry
 ```
 
-要点：
-- 生产路径是 **融合后端**（`OracleSynthesizer.fused_backend=True` 且 `ancilla_num=0`）；
-  `ancilla_num>0` 的旧 ancilla 路径保留但已弃用，不测。
-- `limbdd/patterns/` 只负责 BDD 图阶段的 split 模式；融合引擎不依赖 BDD，只消费
-  `(CompleteBranch, root_mask, key)` 池条目。
+Key points:
+
+- The production path is the **fused backend** (`OracleSynthesizer.fused_backend=True` with
+  `ancilla_num=0`); the legacy ancilla path (`ancilla_num>0`) is retained but deprecated and untested.
+- `limbdd/patterns/` only serves the split patterns of the BDD graph phase; the fusion engine does
+  not depend on BDD and merely consumes pool entries `(CompleteBranch, root_mask, key)`.
 
 ---
 
-## 2. 综合流水线与五项路径（A / C / F / FP / G）
+## 2. Synthesis pipeline and the five paths (A / C / F / FP / G)
 
-### 2.1 总流程
+### 2.1 Overall flow
 
 ```
 TruthTable tt
-  → OracleSynthesizer.synthesize(tt)
-      fused_backend 且 ancilla_num==0:
-        allocate_input_qubit(tt.num_var)   # 显式分配全部输入量子位（§6.4）
-        process_fused_global(tt)
-  → 路径选择（gl_search 时单独走 G，忽略 paths）
-  → 融合到不动点（可选 m2_post 宏 M2 相间调度）
-  → 发射管线（§2.3）
+  -> OracleSynthesizer.synthesize(tt)
+       fused_backend and ancilla_num == 0:
+         allocate_input_qubit(tt.num_var)   # allocate all input qubits explicitly (see section 6.4)
+         process_fused_global(tt)
+  -> path selection (with gl_search the G option runs alone and `paths` is ignored)
+  -> fusion to a fixed point (optional m2_post macro-M2 interleaved schedule)
+  -> emission pipeline (section 2.3)
 ```
 
-`OracleSynthesizer` 开关：
-- `gl_search=False`（默认关）：G 选项，独立成项；
-- `fprm_proxy=False`（默认关）：FP 选项，**取代** F（选择关系，非 min）；
-- `m2_post=True`（默认开）：获胜池追加宏 M2 后处理；
-- `paths=('F',)`（默认）：**单路径纪律**——只允许 `'A'/'C'/'F'` 之一；多路径组合
-  （显式 min）在本阶段禁用。FP 与 G 由开关选择，不与其它路径隐式取 min。
+`OracleSynthesizer` switches:
 
-### 2.2 五项路径
+- `gl_search=False` (default off): option G, a standalone item;
+- `fprm_proxy=False` (default off): option FP, which **replaces** F (a choice relation, not a min);
+- `m2_post=True` (default on): the winning pool gets macro-M2 post-processing;
+- `paths=('F',)` (default): **single-path discipline** — exactly one of `'A'/'C'/'F'`; multi-path
+  combinations (an explicit min) are disabled at this stage. FP and G are selected by switches and
+  are never combined with other paths through an implicit min.
 
-| 标签 | 入口 | 初始池 / 搜索 | 发射三明治 |
+### 2.2 The five paths
+
+| Label | Entry | Initial pool / search | Emission sandwich |
 |---|---|---|---|
-| **A**（BDD） | `paths=('A',)` | `construct`（变量序 + `try_neg`/`split_neg`/`reorder`/sifting）→ `_collect_pieces_fused`（split 模式；absorb 已移除）→ `extract_complete_branches` | 按片根掩码 `X(r)` 三明治 |
-| **C**（ANF） | `paths=('C',)` | `anf_pool`：快速 Möbius，每个单项式 `x^S` 即一个 CompleteBranch（`c=0` 语义） | 无平移三明治 |
-| **F**（FPRM，生产默认） | `paths=('F',)` | `_fprm_entries`：平移子群上搜索最优 `c`；`n≤8` 全枚举 `2^n`，`n≥9` 双起点 `climb2`（起点 `0` 与 `2^n−1`） | `X(c)` 三明治（T 免费） |
-| **FP**（代理） | `paths=('F',)` 且 `fprm_proxy=True` | `fprm_proxy_best`：全枚举 `2^n` 个平移只做 Möbius，代理分 `S1 = Σt(n−|S|) − P`，`(S1,c)` 升序取 top-8 且恒含 `c=0`，仅对 ≤9 个候选完整融合 | `X(c)` 三明治 |
-| **G**（GL） | `gl_search=True`（忽略 paths） | `gl_search`：先求 FPRM 最优 `cF`；起点集 = `{恒等 on f, 恒等 on f∘τ_cF} ∪ {全部单 CNOT on f∘τ_cF}`；CNOT 邻域最陡上升，`max_steps=3`；候选含 `cF`（零 wrapper）⇒ `G ≤ F` | `X(c) · CNOT(A⁻¹) · [段] · CNOT(A) · X(c)`（CNOT 计入 CX） |
+| **A** (BDD) | `paths=('A',)` | `construct` (variable order + `try_neg`/`split_neg`/`reorder`/sifting) -> `_collect_pieces_fused` (split patterns; absorb removed) -> `extract_complete_branches` | per-piece root-mask `X(r)` sandwich |
+| **C** (ANF) | `paths=('C',)` | `anf_pool`: fast Möbius transform, every monomial `x^S` becomes one affine block (`c=0` semantics) | no shift sandwich |
+| **F** (FPRM, production default) | `paths=('F',)` | `_fprm_entries`: search the optimal shift `c` over the translation subgroup; `n≤8` full `2^n` enumeration, `n≥9` two-start `climb2` (starts `0` and `2^n−1`) | `X(c)` sandwich (T-free) |
+| **FP** (proxy) | `paths=('F',)` with `fprm_proxy=True` | `fprm_proxy_best`: enumerate all `2^n` shifts with Möbius only, proxy score `S1 = Σt(n−|S|) − P`, take top-8 by ascending `(S1,c)` and always include `c=0`, then full fusion on ≤9 candidates | `X(c)` sandwich |
+| **G** (GL) | `gl_search=True` (ignores `paths`) | `gl_search`: first compute the FPRM-optimal `cF`; start set = `{identity on f, identity on f∘τ_cF} ∪ {all single CNOTs on f∘τ_cF}`; steepest ascent in the CNOT neighborhood, `max_steps=3`; candidates include `cF` itself (zero wrapper) | `X(c) · CNOT(A⁻¹) · [segments] · CNOT(A) · X(c)` (CNOTs counted in CX) |
 
-路径选择语义：非 G 时按 `paths` 中给定顺序计算，`pool_t_cost` 最低者获胜，并列取先者。
-所有路径最终都进入同一个 `fuse_pool_global` 融合引擎。
+Path-selection semantics: for non-G paths the paths listed in `paths` are computed in the given
+order, the one with the lowest `pool_t_cost` wins, ties keep the earlier one. All paths feed the
+same `fuse_pool_global` engine.
 
-### 2.3 发射管线（`process_fused_global` 尾部）
+For G, the zero-regression relation `G ≤ F` is **structural before macro-M2 post-processing**
+(candidates always include `cF`); with `m2_post` on (the default) it becomes empirical — no
+violation was observed in the n≤7 measurements, and it is not a design constraint.
 
-1. **平移三明治**：若获胜路径含平移 `c`，先整体施加 `X(c)`（`shift_c=0` 时 no-op）；
-2. **GL 线性三明治（仅 G）**：施加 `CNOT(A⁻¹)`（`cnots` 正序）；
-3. **根三明治分组**：`kept` 按根掩码 `r` 分组，对每个 `r`（升序）施加 `X(r)`，
-   组内段用 `order_segments_greedy` 排序后 `merge`，再闭合 `X(r)`；
-4. **standalone 段**：融合产物（`key=None`，自包含）同样经 `order_segments_greedy` 后 `merge`；
-5. **GL 线性三明治闭合**：`CNOT(A)`（`cnots` 逆序）；
-6. **闭合平移三明治** `X(c)`；
-7. `simplify_terms()`：相邻 `LimTerm` 合并（无条件 X 异或、同控同极条件翻转异或、
-   同控异极同目标合并为无条件 X）。
+### 2.3 Emission pipeline (tail of `process_fused_global`)
 
-每段自身由 `CompleteBranch.to_circuit` 发射为**对合三明治**：`X(x_trans) → CNOT 网络 →
-MCX → CNOT 网络(逆) → X(x_trans)`。合成段发射用 `plan_min_cx`（CX 最优基，T 不变）；
-存储的 `SyntheticPlan` 仍保持 RREF 规范形（融合池幂等/哈希）。
+1. **Shift sandwich**: if the winning path carries a shift `c`, apply `X(c)` globally (no-op when
+   `shift_c=0`);
+2. **GL linear sandwich (G only)**: apply `CNOT(A⁻¹)` (`cnots` in forward order);
+3. **Root-sandwich grouping**: group `kept` by root mask `r`, and for each `r` (ascending) apply
+   `X(r)`, merge the group's segments in the order given by `order_segments_greedy`, then close `X(r)`;
+4. **Standalone segments**: fusion products (`key=None`, self-contained) are likewise ordered by
+   `order_segments_greedy` and merged;
+5. **Close the GL linear sandwich**: `CNOT(A)` (`cnots` in reverse order);
+6. **Close the shift sandwich** `X(c)`;
+7. `simplify_terms()`: merge adjacent `LimTerm`s (unconditional X groups XOR together, conditional
+   flips with the same control and polarity XOR together, conditional flips with the same control
+   and opposite polarity but identical targets become one unconditional X).
 
-**B-4 段重排**（`order_segments_greedy`）：以相邻段边界抵消 `boundary_cx_savings` 为边权
-做最近邻贪心（全起点），候选含原始顺序，按真实 `merge + simplify` 管线评估 CX 取最小——
-**只影响 CX，不改变 T**（段集合不变）。
+Each segment is emitted by `CompleteBranch.to_circuit` as an **involutive sandwich**:
+`X(x_trans) → CNOT network → MCX → CNOT network (inverse) → X(x_trans)`. Synthetic segments are
+emitted with `plan_min_cx` (CX-optimal basis; T unchanged), while the stored `SyntheticPlan` keeps
+the RREF canonical form (needed for idempotence/hashing in the fusion pool).
 
----
-
-## 3. 融合引擎要点
-
-- **表示**：每段 = 仿射立方指示函数 `base + span(basis)`；`CompleteBranch.affine()` 为
-  O(n²) 符号推导（无 2^n 枚举）。跨片平移等价于 `base ^= root_mask`（`canonical_affine`）。
-- **闭式判定 C1–C4**（`ClosedForm.fuse_closed`，O(n²) 位运算）：
-  - `K_A == K_B`：`d ∈ K` → C1 抵消（恒接受）；否则 C2 融合；
-  - `K_A ⊂ K_B` 或 `K_B ⊂ K_A` 余维 1 且同大陪集 → C3（集合差，余维 1 嵌套）；
-  - 同维、交余维 1、陪集相交 → C4（`_build_joint`/`_solve_split` 一次消元求交点）。
-- **`fuse_pool_global`**（生产引擎）：输入 `[(CompleteBranch, root_mask, key)]`；
-  - **分桶**：按 `dim(K)` 分桶，只枚举同桶与相邻桶（定理 2 保证可融合 ⇒ dim 差 ≤1）；
-  - **增量匹配**：候选键 `(gain, i, j, cancel)` 全局唯一；幸存候选只重映射索引，
-    新候选仅涉及融合产物；
-  - **纯立方快径**：方向子空间为坐标子空间时退化为 O(popcount) 掩码判定；
-  - 接受准则：抵消恒接受；非抵消仅接受**严格正收益** `gain = t(A)+t(B)−t(F) > 0`。
-  - 返回 `(kept, standalone)`：`kept` 保留片身份（在对应 `X(r)` 三明治内发射），
-    `standalone` 为融合产物（自包含）。
-- **FPRM 预算切换**（`_fprm_entries` / `fprm_best`）：
-  - `n≤8`：全枚举 `2^n` 个平移（n=8 即 256 次完整融合）；
-  - `n≥9`：`climb2` 双起点 `{0, 2^n−1}` 最陡上升（Hamming 邻域、严格改进、缓存），
-    只评估几十次完整融合。**这解释 F 路径 n=9 wall < n=8 wall**（1368ms vs 1984ms）。
-- **G-2.2 gl_search**：确定性 GL(n,2) 局部搜索，小 n 强化选项；n≤7 已验证，
-  n=6 约 **1.05s/例**。时间大头是每次换坐标都要重跑 `fuse_pool_global`（~94%）。
-- **fprm_proxy（方案 A）**：代理预筛取代 F。代理分 `S0 = Σt(n−|S|)`（融合前精确 ΣT）、
-  `P = 差一变量对计数`、`S1 = S0 − P`；top-8 完整融合。恒含 `c=0` ⇒ 结果 ≤ C。
-  n≥9 部署区：保留 F 的 **80–96%** T 缩减质量、快 **3–5×**。
-- **MacroM2（`m2_post`，默认开启）**：
-  - 调度：`fuse_pool_global` 到不动点 → 枚举最佳宏 M2 → 重融，循环 ≤ `max_rounds=30`；
-  - 接受条件：真实总收益 **`imm + g_fuse > 0`**，其中
-    `imm = t(A)+t(B)−t(A⊕h)−t(B⊕h)`（不动点处 ≤0）、
-    `g_fuse = t(A⊕h)+t(C)−t((A⊕h)⊕C)`；Π 中性对（`imm==0`）是有界恶化推广
-    （`imm<0` 但融合补偿）的特例；
-  - C 预筛：`gain(A′,C)>0` 的必要条件是 `dim(K)` 差 ≤1，按 dim 分桶扫描；
-  - XOR 不变量断言仅在 `LIMBDD_FUSION_DEBUG=1` 下执行；每步严格下降 ⇒ 逐例 T 零回归。
+**B-4 segment reordering** (`order_segments_greedy`): nearest-neighbor greedy using the boundary
+cancellation `boundary_cx_savings` as edge weight (all starts tried), candidates include the
+original order, and every candidate is evaluated through the real `merge + simplify` pipeline;
+the CX-minimal one is taken. It **affects CX only and never T** (the segment set is unchanged).
 
 ---
 
-## 4. 成本模型与数据布局
+## 3. Fusion engine highlights
 
-### 4.1 成本函数（`config.py` 单一事实源）
+- **Representation**: each segment is the indicator function of an affine cube `base + span(basis)`;
+  `CompleteBranch.affine()` derives it symbolically in O(n²) (no 2^n enumeration). A cross-slice
+  shift is exactly `base ^= root_mask` (`canonical_affine`).
+- **Closed-form decision C1–C4** (`ClosedForm.fuse_closed`, O(n²) bit operations; this is the
+  production decision path):
+  - `K_A == K_B`: `d ∈ K` -> C1 cancellation (always accepted); otherwise C2 fusion;
+  - `K_A ⊂ K_B` or `K_B ⊂ K_A` with codimension 1 and the same large coset -> C3 (set difference,
+    codimension-1 nesting);
+  - same dimension, intersection of codimension 1, cosets meet -> C4 (one elimination pass via
+    `_build_joint`/`_solve_split` finds the intersection point).
+- **`fuse_pool_global`** (the production engine): input `[(CompleteBranch, root_mask, key)]`;
+  - **bucketing**: bucket by `dim(K)`, enumerate only the same and adjacent buckets (Theorem 2
+    implies fusible pairs have dim difference ≤ 1);
+  - **incremental matching**: candidate keys `(gain, i, j, cancel)` are globally unique; surviving
+    candidates only get their indices remapped, and new candidates involve fusion products only;
+  - **plain-cube fast path**: when the direction subspace is a coordinate subspace the test
+    degenerates to an O(popcount) mask check;
+  - acceptance: cancellation is always accepted; non-cancelling fusions require a **strictly
+    positive gain** `gain = t(A)+t(B)−t(F) > 0`;
+  - returns `(kept, standalone)`: `kept` entries keep their slice identity (emitted inside the
+    corresponding `X(r)` sandwich), `standalone` entries are self-contained fusion products.
+- **FPRM budget switch** (`_fprm_entries` / `fprm_best`):
+  - `n≤8`: full enumeration of all `2^n` shifts (n=8 means 256 complete fusions);
+  - `n≥9`: `climb2`, steepest ascent from the two starts `{0, 2^n−1}` (Hamming neighborhood, strict
+    improvement, caching), which evaluates only a few dozen complete fusions.
+    **This explains why the F path is faster at n=9 than at n=8** (1368 ms vs 1984 ms per case).
+- **gl_search (G)**: deterministic GL(n,2) local search, a small-n enhancement option; validated for
+  n≤7, about **1.05 s/case at n=6**. Most of that time is re-running `fuse_pool_global` for every
+  coordinate change (~94%).
+- **fprm_proxy (option FP)**: proxy prescreen replacing F. Proxy scores `S0 = Σt(n−|S|)` (the exact
+  pre-fusion ΣT), `P` = number of one-variable-apart monomial pairs, `S1 = S0 − P`; top-8 candidates
+  get full fusion. Always including `c=0` implies the result is ≤ the C path.
+  Measured over n=3..10: it retains **85–98%** of F's Exorcism T reduction; it is **8–13× faster at
+  n=7/8** but only about **2× faster at n=9/10** (the proxy pass itself costs O(n·4^n) because every
+  one of the `2^n` shifts needs a Möbius transform, whereas F's `climb2` evaluates only tens of full
+  fusions).
+- **MacroM2 (`m2_post`, on by default)**:
+  - schedule: `fuse_pool_global` to a fixed point -> enumerate the best macro M2 -> re-fuse, at most
+    `max_rounds=30` iterations;
+  - move: for a segment pair `(A,B)` and a candidate `h` (taken from the single-row divergent family
+    of the pair's constraint rows), first apply the two-sided rewrite `{A,B} -> {A⊕h, B⊕h}`, then fuse
+    `A⊕h` with a third segment `C`; the result replaces `{A,B,C}` by `{B⊕h, (A⊕h)⊕C}`;
+  - acceptance uses the **true total gain** `imm + g_fuse > 0`, with
+    `imm = t(A)+t(B)−t(A⊕h)−t(B⊕h)` (necessarily ≤ 0 at a fixed point) and
+    `g_fuse = t(A⊕h)+t(C)−t((A⊕h)⊕C)`; the pair rewrite itself may be T-neutral or slightly
+    worsening — only the total is required to be positive;
+  - C prescreen: a necessary condition for `gain(A′,C) > 0` is a `dim(K)` difference ≤ 1, so `C` is
+    scanned per dim bucket;
+  - the XOR-invariant assertion runs only under `LIMBDD_FUSION_DEBUG=1`; every step strictly
+    decreases, hence per-case T never regresses.
+
+---
+
+## 4. Cost model and data layout
+
+### 4.1 Cost functions (`config.py`, single source of truth)
 
 ```python
 t_cost  = lambda x: 0 if x <= 1 else 8 * (x - 1) - 1
 cx_cost = lambda x: 0 if x <= 0 else (1 if x == 1 else 6 * (x - 1))
 ```
 
-口径：MCX/CCX 按其控制数计 `t_cost(k)` / `cx_cost(k)`；显式 CX 计 1 个 CX；X 免费。
+Convention: an MCX/CCX with `k` controls costs `t_cost(k)` / `cx_cost(k)`; an explicit CX costs one
+CX; X gates are free.
 
-### 4.2 数据目录
+### 4.2 Data directories
 
 ```
-data/test_cases/test_cases_{n}                    # 每行一个真值表整数；n=3 全 256、n=4 全 65536、n≥5 各 10000
-data/exorcism_cost/exorcism_{t,cx}_cost_{n}       # Exorcism 基线（按行号对齐）
-data/sshr_cost/sshr_{t,cx}_cost_{n}               # SSHR 基线（n≥7 暂空则自动跳过）
+data/test_cases/test_cases_{n}                    # one truth-table integer per line
+data/exorcism_cost/exorcism_{t,cx}_cost_{n}       # Exorcism baseline (aligned by line number)
+data/sshr_cost/sshr_{t,cx}_cost_{n}               # SSHR baseline (n>=7 empty -> skipped automatically)
 data/our_cost/
   t_cost/    our_t_cost_{tag}_{n}_{start}_{stop}.txt
   cx_cost/   our_cx_cost_{tag}_{n}_{start}_{stop}.txt
-  deg_bound/ our_deg_bound_{tag}_{n}_{start}_{stop}.txt   # G-3 下界 t(deg f)
-  our_results_{tag}_{n}_{start}_{stop}.txt                # 汇总报告
+  deg_bound/ our_deg_bound_{tag}_{n}_{start}_{stop}.txt   # G-3 lower bound t(deg f)
+  our_results_{tag}_{n}_{start}_{stop}.txt                # summary report
 ```
 
-- `tag ∈ {A, C, F, FP, G}`：`paths_tag` 生成——`gl_search` → `G`；`fprm_proxy` 且 F → `FP`；
-  其余取单路径字符。
-- 2025-08-24 数据口径：n=3 全 256、n=4 全 65536、n=5–7 各 10000、n=8–10 各 1000 例；
-  A/C/F/FP 全 n，G 仅 n=3–6；融合后端含 `m2_post`（默认）。
+- `tag ∈ {A, C, F, FP, G}` as produced by `paths_tag`: `gl_search` -> `G`; `fprm_proxy` with F -> `FP`;
+  otherwise the single path character.
+- Measurement campaign sizes: n=3 all 256 cases, n=4 all 65536, n=5–7 10000 each, n=8–10 1000 each;
+  A/C/F/FP for all n, G only for n=3–6; the fused backend includes `m2_post` (default). An n=11
+  dataset (test cases, Exorcism baselines and per-path results for 1000 cases) has since been added.
 
 ---
 
-## 5. 测试纪律与验收口径
+## 5. Testing discipline and acceptance conventions
 
-1. **例行改动只测 n≤7**；n≥8 仅在最终汇总轮跑（时间预算约束）。
-2. **单路径纪律**：只测 A / C / F / FP / G 五项独立路径，路径间不取 min；
-   FP 与 G 为开关项，不与默认 F 隐式组合。
-3. **确定性**：全枚举 / 确定性起点（climb2、GL 起点集、代理排序 `(S1,c)`）/
-   确定性平局规则；不使用随机采样（旧 rand64 已被 climb2 取代）。
-4. **XOR 不变量**：融合引擎与宏 M2 在 `LIMBDD_FUSION_DEBUG=1` 下逐轮断言
-   池 XOR == 原函数（M2 重写 `h⊕h=0` 保证）。
-5. **时间测量**：`time.perf_counter_ns()` 包住 `synthesize(tt)`，逐例累计取平均
-   wall（`evaluate.py` 输出 `avg synthesize wall`）；同机、同提交、同进程数记录。
-6. **发射验证**：端到端 `circ.verify(tt)` / `compute_tt() == tt.bitstr` 逐例通过
-   （tests/test_* 各路径套件均含发射级 compute_tt 对账）。
+1. **Routine changes are tested for n≤7 only**; n≥8 runs are reserved for the final aggregation round
+   (time budget).
+2. **Single-path discipline**: only the five independent paths A / C / F / FP / G are measured, and no
+   min is taken across paths; FP and G are switch options and are never implicitly combined with the
+   default F.
+3. **Determinism**: full enumeration / deterministic start sets (`climb2`, the GL start set, the
+   `(S1,c)` proxy ordering) / deterministic tie-breaking; no random sampling (the old rand64 sampler
+   was replaced by `climb2`).
+4. **XOR invariant**: under `LIMBDD_FUSION_DEBUG=1` the fusion engine and macro M2 assert round by
+   round that the pool XOR equals the target function (guaranteed by `h⊕h=0` for M2 rewrites).
+5. **Time measurement**: `time.perf_counter_ns()` around `synthesize(tt)`, accumulated per case and
+   averaged (`evaluate.py` prints `avg synthesize wall`); recorded on the same machine, commit and
+   process count.
+6. **Emission verification**: end-to-end `circ.verify(tt)` / `compute_tt() == tt.bitstr` per case
+   (every path suite in `tests/test_*` includes the emission-level `compute_tt` check).
 
 ---
 
-## 6. 已定结论（final decisions）
+## 6. Final decisions
 
-### 6.1 图阶段与路径定位
+### 6.1 Graph phase and path positioning
 
-- **absorb 已移除**：`LimBDDManager.collect_branches` 不再调用 `try_absorb_branch`
-  （函数本体保留供研究）。P4 实测其单独效应严格为零（±8 噪声级）——它只做 C1 抵消，
-  而 `fuse_pool_global` 无条件覆盖 C1。
-- **split 模式保持激活**：split 是 BDD 路径的核心承诺机制（去掉后 n≤6 恶化 10–13%），
-  代数本质见 `exorlink_unification.md`（δ=2 几何子类）。
-- **BDD 路径是 n≤6 的廉价补充**：A 的小 n 优势来自 Shannon/LIM 结构化粗池 + split 承诺；
-  n≥7 后 A 相对 F 明显退化（A 的 Exorcism CX 缩减转负 −3.1%→−9.2%），不作主力。
-- **生产后端 = F（m2_post 开）**；**FP** 用于时间敏感运行（质量略降、更快）；
-  **G** 仅小 n 质量模式（n≤6 质量最高，但 wall 1051.6ms/例 @n=6）。
-- **A / C 在 n≥7 退化**：相对 F，二者 T 缩减明显收窄；A 的 Exorcism CX 缩减转负
-  （−3.1%→−9.2%），C 的 Exorcism CX 缩减仅 +4~9% 量级。二者保留为路径对照与
-  粗池研究价值，不作为生产默认。
+- **absorb removed**: `LimBDDManager.collect_branches` no longer calls `try_absorb_branch` (the
+  function body is kept for research). A dedicated measurement
+  (`experiments/bdd_split_absorb_probe.py`) showed its isolated effect is exactly zero (±8 noise
+  level): it only performs C1 cancellations, which `fuse_pool_global` covers unconditionally.
+- **split patterns stay active**: they are the core commitment mechanism of the BDD path (removing
+  them degrades n≤6 by 10–13%).
+- **The BDD path is a cheap supplement for n≤6**: A's small-n advantage comes from the
+  Shannon/LIM-structured coarse pool plus split commitment; from n≥7 on, A degrades noticeably
+  relative to F (A's Exorcism CX reduction even turns negative, −3.1% → −9.2%), so it is not a
+  workhorse.
+- **Production backend = F (with m2_post on)**; **FP** serves time-sensitive runs (slightly lower
+  quality, faster); **G** is a small-n quality mode (best quality up to n=6, but 1051.6 ms/case at
+  n=6).
+- **A / C degrade for n≥7**: compared with F their T reduction narrows markedly; A's Exorcism CX
+  reduction turns negative (−3.1% → −9.2%) and C's is only +4~9%. Both are kept as path controls and
+  for coarse-pool research, not as production defaults.
 
-### 6.2 最终数据摘要（2025-08-24，`experiments/data_summary.py`）
+### 6.2 Final data summary (`experiments/data_summary.py`)
 
-**F 路径 vs Exorcism T（n=3..10）**：`+30.9% / +38.4% / +41.4% / +38.4% / +32.2% /
-+27.3% / +21.7% / +20.8%`，**higher 例数全 0**。
+**F path vs Exorcism T (n=3..10)**: `+30.9% / +38.4% / +41.4% / +38.4% / +32.2% / +27.3% / +21.7% /
++20.8%`, **with zero higher cases**.
 
-**F 路径 vs Exorcism CX（n=3..10）**：`+18.9% / +24.6% / +28.8% / +26.6% / +22.0% /
-+19.0% / +14.9% / +15.5%`（n≥7 higher ≤10 例）。
+**F path vs Exorcism CX (n=3..10)**: `+18.9% / +24.6% / +28.8% / +26.6% / +22.0% / +19.0% / +14.9% /
++15.5%` (at most 10 higher cases for n≥7).
 
-**F 路径 vs SSHR（n=3..6）**：T `+20~29%`，CX `+18~27%`。
+**F path vs SSHR (n=3..6)**: T `+20~29%`, CX `+18~27%`.
 
-**wall（ms/例，F）**：
+**Wall (ms/case, F)**:
 
 | n | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 |
 |---|---|---|---|---|---|---|---|---|
 | F | 0.5 | 2.2 | 11.4 | 61.0 | 340.9 | 1984.4 | 1368.2 | 5411.5 |
 
-（FP：0.5 / 1.3 / 3.7 / 12.0 / 41.6 / 155.2 / 639.5 / 2776.4；A/C 介于 0.3~1158。
-F n=9 < n=8 的成因见 §3 FPRM 预算切换。）
+(FP: 0.5 / 1.3 / 3.7 / 12.0 / 41.6 / 155.2 / 639.5 / 2776.4; A/C lie between 0.3 and 1158. The fact
+that F at n=9 is faster than at n=8 is explained by the FPRM budget switch in §3.)
 
-### 6.3 质量/时间开关结论
+### 6.3 Quality/time switch conclusions
 
-- **GL**：n≤6 质量最高（G n=6 Exorcism T +50.0%），但 wall 显著（n=6 1051.6ms/例），
-  仅作小 n 质量展示/强化选项。
-- **FP**：保留 F 的 80–96% T 缩减质量，快 3–5×；n≥9 部署区初测双优，正式汇总后
-  作为时间敏感场景的默认替代。
-- **M2**：默认开启（T 逐例零回归、n≤7 全量 CX 劣化 0 例、时间 0~2.3ms/例）；在 F/G
-  上边际 ≈0、在 A/C/FP 上 −0.4~−6.4%，但廉价且零回归，故并入默认融合后端。
+- **GL**: best quality for n≤6 (G at n=6: Exorcism T +50.0%), but a heavy wall time (1051.6 ms/case
+  at n=6), so it remains a small-n quality demonstration/enhancement option.
+- **FP**: retains 85–98% of F's T reduction and is 8–13× faster at n=7/8 (about 2× at n=9/10); it is
+  the intended substitute for F in time-sensitive runs.
+- **M2**: on by default (per-case T never regresses, zero CX-worse cases over the full n≤7
+  measurements, 0~2.3 ms/case); its marginal effect is ≈0 on F/G and −0.4~−6.4% on A/C/FP, but it is
+  cheap and regression-free, so it is part of the default fused backend.
 
-### 6.4 输入分配修复（融合后端）
+### 6.4 Input-qubit allocation fix (fused backend)
 
-融合后端跳过 `construct` 时不建 BDD，此前输入量子位惰性分配——若某变量不出现在任何
-发射算子（例如 f 与 x₀ 无关，回归例 n=4 tt=64560），`compute_tt` 会在缩小的变量空间上
-枚举，导致发射 tt 错位。现 `synthesize` 在融合路径入口 **显式分配全部输入量子位**
-（`allocate_input_qubit(tt.num_var)`）。**此前融合后端生成的旧数据文件可能含此类静默
-错误条目，最终聚合前需重跑校验**（当前 `data/our_cost/` 为修复后重跑产物）。
+The fused backend skips `construct` (no BDD is built) and previously allocated input qubits lazily:
+if a variable appeared in no emitted operator (for example f independent of x₀; regression case n=4,
+tt=64560), `compute_tt` enumerated over a shrunken variable space and the emitted truth table was
+misaligned. `synthesize` now **explicitly allocates all input qubits** at the fused-path entry
+(`allocate_input_qubit(tt.num_var)`). Data files produced by the fused backend before this fix may
+contain such silently wrong entries and must be re-verified before any final aggregation (the current
+`data/our_cost/` files are products of the re-run after the fix).
 
 ---
 
-## 7. 与保留理论文档的关系
+## 7. Relation to the algebra document
 
-- `docs/CompleteBranch_algebra.md`：融合判定的数学基础（定理 1/2、§3.6–3.7 规范构造、
-  平移不变性），是 `backend/CompleteBranch.py` 与 `backend/fusion/ClosedForm.py` 的依据；
-- `docs/exorlink_unification.md`：统一池重写算子族（δ=1 融合、δ=2 split、T-中性对旋转），
-  是理解「split 已被构图期前置消费、引擎内 δ≥3 机会为 0」的理论框架；
-- `docs/macro_m2_theory.md`：宏 M2 形式化，对应 `backend/fusion/MacroM2.py` 的生产实现。
+`docs/CompleteBranch_algebra.md` is the mathematical foundation of the fusion decision (Theorem 1:
+affine block ⟺ affine-cube function; Theorem 2: the C1–C4 classification of symmetric differences;
+§3.6–3.7: the canonical construction and the algebraic closed forms; §1.4: shift invariance). It is
+the reference for `backend/CompleteBranch.py` and `backend/fusion/ClosedForm.py`. Macro M2 has no
+separate theory document; its definition, acceptance condition and invariants are the ones described
+in §3 above and implemented in `backend/fusion/MacroM2.py`.

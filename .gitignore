@@ -7,3 +7,7 @@ venv/
 __pycache__/
 experiments/phase0_results/
 data/*.so
+# private working notes: kept locally, never committed
+docs/future_work.md
+docs/exorlink_unification.md
+docs/macro_m2_theory.md

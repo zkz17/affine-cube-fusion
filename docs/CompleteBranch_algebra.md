@@ -1,655 +1,898 @@
-# CompleteBranch 分支融合的代数基础（详细评审稿）
+# Algebraic Foundations of CompleteBranch Branch Fusion
 
-> **命名注（2025-08）**：代码中的 `CompleteBranch` 与论文术语 **Affine Block（仿射块）** 是
-> 同一概念的两个名称——对象本质与 BDD 谱系无关，而是「仿射子空间指示函数 + 规范发射计划」
-> （定理 1 与定理 3′）。本文档中两词可互换使用。
+> **Naming note (2025-08)**: the code object `CompleteBranch` and the paper term **Affine Block** are
+> two names for the same concept — the essence of the object is independent of the BDD lineage; it is
+> "the indicator function of an affine subspace + a canonical emission plan"
+> (Theorem 1 and Theorem 3′). The two terms are used interchangeably in this document.
 >
-> 本文件是代数基础文档，只阐述数学内容，不涉及实现细节，供逐条审查；系统级设计见 `docs/architecture.md`。
-> 所有结论均已在 `experiments/phase0_branch_stats.py` 的探针框架下实测验证；验证方式与数值在文末附录中列出。
+> This file is the algebraic-foundation document of the framework; it states only the mathematics and
+> does not cover implementation details. See `docs/architecture.md` for the system-level design.
+> All conclusions were verified under the probe framework of `experiments/phase0_branch_stats.py`;
+> the verification methods and numbers are listed in the appendices at the end.
 >
-> 记号约定见 §0。建议按 §8 的检查清单逐条核对。
+> Notation conventions are given in §0. It is recommended to go through the §8 checklist item by item.
 
 ---
 
-## 0. 记号与约定
+## 0. Notation and conventions
 
-| 记号 | 含义 |
+| Notation | Meaning |
 |---|---|
-| `V = GF(2)^n` | n 个输入变量张成的二元向量空间；向量写作二进制串或位掩码整数，**bit k = 变量 k**（绝对变量位空间） |
-| `⊕` | GF(2) 加法（比特/向量/整数的异或） |
-| `⟨v₁,…,v_k⟩` / `span{…}` | 向量张成的线性子空间 |
-| `S △ T` | 集合对称差 `(S∖T) ∪ (T∖S)` |
-| `supp(f)` | 函数 f 的支撑集 `{x : f(x) = 1}` |
-| `1_S(x)` | 集合 S 的指示函数 |
-| `t(c)` | c 控制 MCX 的 T 代价（查表 `T_COST`；X/CX/CNOT 计 0） |
-| `f_A` | 分支段 A 在目标比特上的翻转函数（`f_A : V → GF(2)`） |
-| 仿射子空间 | 形如 `S = a + K` 的集合，K 为线性子空间（方向），a 为平移；`dim S := dim K` |
+| `V = GF(2)^n` | the binary vector space spanned by the n input variables; vectors are written as binary strings or bitmask integers, **bit k = variable k** (absolute variable bit space) |
+| `⊕` | GF(2) addition (XOR of bits / vectors / integers) |
+| `⟨v₁,…,v_k⟩` / `span{…}` | the linear subspace spanned by vectors |
+| `S △ T` | symmetric difference of sets `(S∖T) ∪ (T∖S)` |
+| `supp(f)` | support of the function f, `{x : f(x) = 1}` |
+| `1_S(x)` | indicator function of the set S |
+| `t(c)` | T cost of a c-controlled MCX (looked up in `T_COST`; X/CX/CNOT count as 0) |
+| `f_A` | flip function of branch segment A on the target bit (`f_A : V → GF(2)`) |
+| affine subspace | a set of the form `S = a + K`, K a linear subspace (the direction), a the shift; `dim S := dim K` |
 
-**对象族定义（2025-08 修订，贯穿全文的约定）**：
+**Object-family definitions (2025-08 revision; used throughout the document)**:
 
-- **仿射立方函数（affine cube function）**：维数 `k ≥ 0` 时，是某个仿射子空间 `S = a + K`
-  （`dim K = k`）的指示函数 `1_S`；**维数 `k = −1` 时，是恒零函数 `0`**（其支撑为 `∅`）。
-  严格地说 `∅` 不是仿射子空间——本文只在**函数层**使用「零立方（zero cube）」一词；
-  集合层始终如实写 `supp(f) = ∅`。
-  **−1 是「缺省」哨兵值，不参与两个只在 k ≥ 0 上有定义的公式**：势公式 `|S| = 2^k`
-  与控制数公式 `m = n − k` 均不延拓到 −1（否则 m = n+1 无意义）；唯一延拓到 −1 的
-  量是代价 `t̄(−1) := 0`（见下）。不把 ∅ 的维数改定义为其它值的原因：若取 `dim ∅ = n`
-  则与 `1_V`（支撑 V、dim n）冲突，破坏「dim ↔ 支撑」的单射与定理 2 全部势论证；
-  若取 −∞ 则破坏 `|S| = 2^k` 的运算形式。故 −1 是保持上述两个公式完整性的唯一选择。
-- **仿射块（affine block = 代码中的 CompleteBranch）**：数据寄存器上的对合电路
-  `X 网络 · CNOT 网络 · MCX(C, p) · CNOT 逆网络 · X 网络`，其中 **MCX 允许缺省**；
-  缺省时为空电路，称为**零块（zero block）**，实现零函数、T 代价 0。
-  零块是 C1 抵消在表示层的归宿（定理 1/2 见后文）。
-- **零立方与零块的对应**：`dim = −1` 的仿射立方函数恰由零块实现；池中零块
-  一经产生即删除（C1 两步合一），故池不变量可表述为「池中永无零块」。
+- **Affine cube function**: for dimension `k ≥ 0`, the indicator function `1_S` of an affine subspace
+  `S = a + K` (`dim K = k`); **for dimension `k = −1`, the identically-zero function `0`** (support `∅`).
+  Strictly speaking `∅` is not an affine subspace — this document uses the term **zero cube** only at
+  the **function level**; at the set level we always write `supp(f) = ∅` literally.
+  **−1 is a "default" sentinel value and does not participate in the two formulas defined only for k ≥ 0**:
+  the cardinality formula `|S| = 2^k` and the control-count formula `m = n − k` are not extended to −1
+  (otherwise m = n+1 would be meaningless); the only quantity extended to −1 is the cost `t̄(−1) := 0`
+  (see below). The reason not to redefine the dimension of ∅ to some other value: if we set `dim ∅ = n`,
+  it collides with `1_V` (support V, dim n), breaking the "dim ↔ support" injection and all the cardinality
+  arguments of Theorem 2; if we set it to −∞, the operational form of `|S| = 2^k` breaks. Thus −1 is the
+  only choice that preserves the integrity of those two formulas.
+- **Affine block (affine block = the code's CompleteBranch)**: an involution circuit on the data
+  register
+  `X network · CNOT network · MCX(C, p) · CNOT inverse network · X network`, where **the MCX may be omitted**;
+  when omitted the circuit is empty and is called the **zero block**, realizing the zero function with
+  T cost 0.
+  The zero block is the representation-level resting place of C1 cancellation (Theorems 1/2 below).
+- **Correspondence between zero cube and zero block**: the affine cube function of `dim = −1` is exactly
+  the one realized by the zero block; a zero block is removed from the pool as soon as it is produced
+  (C1 two-step merge), so the pool invariant can be stated as "the pool never contains a zero block".
 
-两个贯穿全文的事实：
+Two facts used throughout:
 
-1. **电路的可加性**：所有分支段按顺序拼接时，目标比特的净翻转 = 各段翻转函数的 XOR（每段都是对合：输入恢复原状、目标按 `f_A(x)` 翻转，故顺序执行 = 逐项相加）。
-2. **融合恒等式**：分支融合的全部代数内容就是集合/函数恒等式
-   `{A, B} → {A⊕B}`（在池的 XOR 和中用 `f_A ⊕ f_B` 替换 `f_A + f_B`）。
+1. **Circuit additivity**: when all branch segments are concatenated in order, the net flip on the target
+   bit = XOR of the individual flip functions (each segment is an involution: the input is restored and
+   the target flips according to `f_A(x)`, so sequential execution = term-by-term addition).
+2. **Fusion identity**: the entire algebraic content of branch fusion is the set/function identity
+   `{A, B} → {A⊕B}` (replacing `f_A + f_B` by `f_A ⊕ f_B` in the pool's XOR sum).
 
 ---
 
-## 1. 分支段的电路语义与函数
+## 1. Circuit semantics of a branch segment and its function
 
-### 1.1 分支段的定义
+### 1.1 Definition of a branch segment
 
-一个**分支段（BranchSegment）**由自顶向下逐层的位置序列描述，每层一个 `Position`：
+A **branch segment (BranchSegment)** is described by a top-down sequence of positions, one `Position` per level:
 
 ```
 Position = (var, ft, bit, w0, w1, lim0, lim1)
-   var        : 该层判定变量的绝对索引
-   ft ∈ {0,1} : 该层是否 fallthrough（low/high 两条边指向同一孩子且 w0=w1=1）
-   bit ∈ {0,1}: 非 ft 层所走边的 0/1 选择（ft 层无意义，记为 -）
-   w0, w1     : low/high 边的权重
-   lim0, lim1 : low/high 边的 Lim 翻转掩码（绝对变量位空间整数，bit k = 变量 k）
+   var        : absolute index of the decision variable at this level
+   ft ∈ {0,1} : whether this level is fallthrough (the low/high edges point to the same child and w0=w1=1)
+   bit ∈ {0,1}: the 0/1 choice of the edge taken at a non-ft level (meaningless at an ft level, written -)
+   w0, w1     : weights of the low/high edges
+   lim0, lim1 : Lim flip masks of the low/high edges (integers in the absolute variable bit space, bit k = variable k)
 ```
 
-发射语义（与 `branch2circ` 逐层镜像）：
+Emission semantics (mirroring `branch2circ` in `backend/OracleSynthesizer.py` level by level):
 
-- **非 ft 层**：先无条件施加翻转 `X(lim_bit)`（所选边的 Lim 掩码，作用于**更深的变量**，不含本层变量），再把后续电路整体置于控制 `x_var == bit` 之下；末尾对称地再施加一次 `X(lim_bit)`（反计算）。
-- **ft 层**：施加两个条件翻转 `[x_var=0 → X(lim0)]` 与 `[x_var=1 → X(lim1)]`，后续电路**无条件**继续（本层不产生控制位）；末尾对称反计算。
-- **终结**：目标比特无条件翻转（X 门，与之前累积的控制条件共同生效）。
+- **Non-ft level**: first apply the unconditional flip `X(lim_bit)` (the Lim mask of the chosen edge, acting
+  on **deeper variables**, not including this level's variable), then place the entire subsequent circuit
+  under the control `x_var == bit`; at the end apply `X(lim_bit)` once more symmetrically (uncomputation).
+- **ft level**: apply the two conditional flips `[x_var=0 → X(lim0)]` and `[x_var=1 → X(lim1)]`, and the
+  subsequent circuit continues **unconditionally** (this level produces no control bit); symmetric
+  uncomputation at the end.
+- **Termination**: the target bit is flipped unconditionally (X gate, effective jointly with the accumulated
+  control conditions).
 
-权重约定：非 ft 层 `w_bit` 必须为 1（权重 0 的边不在该分支上）；`w0=w1=0` 的结点不出现在任何分支中。
+Weight convention: at a non-ft level `w_bit` must be 1 (a weight-0 edge is not on the branch); nodes with
+`w0=w1=0` do not appear in any branch.
 
-### 1.2 状态演化方程
+### 1.2 State-evolution equations
 
-设输入为 `x`，令 `e_i` 为处理完前 i 层（进入第 i+1 层之前）的**有效状态**。逐层：
+Let the input be `x`, and let `e_i` be the **effective state** after the first i levels (before entering level
+i+1). Level by level:
 
-- 非 ft 层：`e_i = e_{i-1} ⊕ lim_bit`（常数翻转）；
-- ft 层：`e_i = e_{i-1} ⊕ A_var(e_{i-1})`，其中
-  `A_var(z) = lim0 ⊕ z_var · (lim0 ⊕ lim1)`（条件翻转，`z_var` 为该变量的当前值）；
-- 每个非 ft 层的判定条件为 `(e_{i-1})_{var} == bit`；
-- 最终 `f(x) = 1` ⟺ 所有非 ft 层的判定条件同时成立。
+- non-ft level: `e_i = e_{i-1} ⊕ lim_bit` (constant flip);
+- ft level: `e_i = e_{i-1} ⊕ A_var(e_{i-1})`, where
+  `A_var(z) = lim0 ⊕ z_var · (lim0 ⊕ lim1)` (conditional flip, `z_var` the current value of that variable);
+- the decision condition of each non-ft level is `(e_{i-1})_{var} == bit`;
+- finally `f(x) = 1` ⟺ all non-ft decision conditions hold simultaneously.
 
-### 1.3 定理 1（Affine Block ⟺ 仿射立方函数：等价性定理，2025-08 修订）
+### 1.3 Theorem 1 (Affine Block ⟺ affine cube function: equivalence theorem, 2025-08 revision)
 
-**定理 1**：
+**Theorem 1**:
 
-1. **必要性（⟹）**：每个仿射块的翻转函数是仿射立方函数；且 m 控（MCX 控制数 m）
-   仿射块的翻转函数支撑维数恰为 `n − m`；MCX 缺省（零块）当且仅当翻转函数 ≡ 0
-   （零立方，dim = −1）。
-2. **充分性（⟸）**：每个仿射立方函数可由仿射块实现：`dim = −1` 对应零块；
-   `dim = k ≥ 0` 对应 §3.6 的 RREF 规范构造，MCX 控制数恰为 `n − k`。
+1. **Necessity (⟹)**: the flip function of every affine block is an affine cube function; moreover, the
+   support dimension of the flip function of an m-controlled (MCX control count m) affine block is exactly
+   `n − m`; the MCX is omitted (zero block) iff the flip function is ≡ 0 (zero cube, dim = −1).
+2. **Sufficiency (⟸)**: every affine cube function can be realized by an affine block: `dim = −1` corresponds
+   to the zero block; `dim = k ≥ 0` corresponds to the RREF canonical construction of §3.6, with MCX control
+   count exactly `n − k`.
 
-**准备引理 1.3.a（数据寄存器上的基本门都是仿射对合）**：X、CNOT、以及任意
-「数据控制的条件翻转」`[x_c = p → X(t)]`（c 为数据比特、t 为被翻转比特）都是
-`V = GF(2)^n` 上的可逆仿射变换，且均为对合。
+**Preparation Lemma 1.3.a (all basic gates on the data register are affine involutions)**: X, CNOT, and any
+"data-controlled conditional flip" `[x_c = p → X(t)]` (c a data bit, t the flipped bit) are invertible affine
+transformations on `V = GF(2)^n`, and each is an involution.
 
-*证明*：X 是平移 `y ↦ y ⊕ x_trans`；CNOT(c→t) 是转置 `y ↦ y ⊕ y_c·e_t`（线性）。
-条件翻转：指示函数可写为 `1_{x_c = p} = x_c ⊕ p ⊕ 1`（GF(2) 上逐位验证：当
-`x_c = p` 时右端为 1，否则为 0），故
-`y = x ⊕ e_t · 1_{x_c = p} = x ⊕ e_t·x_c ⊕ (p⊕1)·e_t`——线性部分 `I + e_t e_c^T` 可逆
-（对合）、常数项 `(p⊕1)·e_t`。三者皆对合。∎
+*Proof*: X is the translation `y ↦ y ⊕ x_trans`; CNOT(c→t) is the transvection `y ↦ y ⊕ y_c·e_t` (linear).
+For a conditional flip: its indicator function can be written `1_{x_c = p} = x_c ⊕ p ⊕ 1` (verify bit by bit
+over GF(2): when `x_c = p` the right side is 1, otherwise 0), hence
+`y = x ⊕ e_t · 1_{x_c = p} = x ⊕ e_t·x_c ⊕ (p⊕1)·e_t` — the linear part `I + e_t e_c^T` is invertible
+(an involution), the constant term is `(p⊕1)·e_t`. All three are involutions. ∎
 
-**推论 1.3.b（三明治网络的前后缀互逆）**：若 `N = g_1 ∘ … ∘ g_k` 为仿射对合之积，
-则 N 可逆且 `N⁻¹ = g_k ∘ … ∘ g_1`（逐项自逆 + 逆序）。故任意「仿射网络 N · MCX · 反序
-网络」的块自动满足对合性（输入复原），这正是 §6.2 三明治要求的代数来源。
+**Corollary 1.3.b (the prefix and suffix of the sandwich network are mutually inverse)**: if
+`N = g_1 ∘ … ∘ g_k` is a product of affine involutions, then N is invertible and
+`N⁻¹ = g_k ∘ … ∘ g_1` (each factor self-inverse + reverse order). Hence every block of the form
+"affine network N · MCX · reverse network" automatically satisfies involutivity (input restoration); this is
+the algebraic origin of the §6.2 sandwich requirement.
 
-**(1) 必要性的完整证明**：
-1. 设仿射块 B 的数据网络前缀为 N（X/CNOT/条件翻转的乘积）。由引理 1.3.a 与推论 1.3.b，
-   `N(x) = Lx ⊕ b`，`L ∈ GL(n,2)`（仿射映射之积仍仿射；各因子可逆 ⇒ L 可逆），且发射语义
-   中的后缀恰为 `N⁻¹`。于是整块作用于寄存器上的净效果 = `N · MCX · N⁻¹`。
-2. **MCX 存在时**：MCX 翻转目标 ⟺ `N(x)_C = p_C` ⟺ 对每个控制坐标 i ∈ C：
-   `ℓ_i(x) = c_i`，其中 `ℓ_i(x) = (Lx)_i` 是 x 的线性型、`c_i = p_i ⊕ b_i`。L 可逆 ⇒
-   其第 i 行两两线性无关 ⇒ 这是 `m = |C|` 个**线性无关**的仿射方程（超平面）。有限个
-   超平面之交是仿射子空间（非空：`N⁻¹` 作用在满足极性的点上给出解），维数
-   `n − rank{ℓ_i} = n − m`。故 `supp(f_B) = S = a + K`、`dim K = n − m`，f_B 是维数
-   n − m 的仿射立方函数。
-3. **MCX 缺省时（零块）**：寄存器上无任何受条件约束的目标翻转（块为空电路或仅剩
-   前后缀的 X/CNOT 网络——注意前缀 N 与后缀 N⁻¹ 前后抵消，不翻转目标），故
-   `f_B ≡ 0` = 零立方（dim −1）。
-4. **反向唯一性**：若 `f_B ≡ 0`，则块中必无 MCX——有 MCX 时支撑为**非空**仿射子空间
-   （仿射子空间必含基点 a），不可能恒零。故 `f ≡ 0 ⟺ 零块`。∎
+**(1) Complete proof of necessity**:
+1. Let N be the data-network prefix of an affine block B (a product of X/CNOT/conditional flips). By Lemma 1.3.a
+   and Corollary 1.3.b, `N(x) = Lx ⊕ b`, `L ∈ GL(n,2)` (a product of affine maps is affine; each factor
+   invertible ⇒ L invertible), and the suffix in the emission semantics is exactly `N⁻¹`. Thus the net effect
+   of the whole block on the register = `N · MCX · N⁻¹`.
+2. **When the MCX is present**: the MCX flips the target ⟺ `N(x)_C = p_C` ⟺ for every control coordinate
+   i ∈ C: `ℓ_i(x) = c_i`, where `ℓ_i(x) = (Lx)_i` is a linear form in x and `c_i = p_i ⊕ b_i`. Since L is
+   invertible, its i-th rows are pairwise linearly independent ⇒ these are `m = |C|` **linearly independent**
+   affine equations (hyperplanes). The intersection of finitely many hyperplanes is an affine subspace
+   (nonempty: acting on a point satisfying the polarities with `N⁻¹` yields a solution) of dimension
+   `n − rank{ℓ_i} = n − m`. Hence `supp(f_B) = S = a + K`, `dim K = n − m`, and f_B is an affine cube
+   function of dimension n − m.
+3. **When the MCX is omitted (zero block)**: no conditionally controlled target flip acts on the register
+   (the block is the empty circuit, or only the X/CNOT networks of the prefix and suffix remain — note that
+   prefix N and suffix N⁻¹ cancel each other and do not flip the target), so `f_B ≡ 0` = zero cube (dim −1).
+4. **Uniqueness in the reverse direction**: if `f_B ≡ 0`, the block must contain no MCX — with an MCX present
+   the support is a **nonempty** affine subspace (an affine subspace always contains its base point a) and
+   cannot be identically zero. Therefore `f ≡ 0 ⟺ zero block`. ∎
 
-**(2) 充分性的完整证明**：
-1. `dim = −1`（`f ≡ 0`）：零块（空电路）实现之。∎
-2. `dim = k ≥ 0`（`f = 1_{a+K}`）：取 K 的任意基 `B = {b_1, …, b_k}`，执行 §3.6 的
-   RREF 规范构造。其正确性归结为下面的**隶属特征引理**：
+**(2) Complete proof of sufficiency**:
+1. `dim = −1` (`f ≡ 0`): the zero block (empty circuit) realizes it. ∎
+2. `dim = k ≥ 0` (`f = 1_{a+K}`): take any basis `B = {b_1, …, b_k}` of K and run the RREF canonical
+   construction of §3.6. Its correctness reduces to the following **membership-characterization lemma**:
 
-   **引理 1.3.c（RREF 行空间的自由列参数化）**：设 B 经「主元 = 最低置位、完全消元」
-   的 RREF 得到主元列 P、自由列 F = [n]∖P 与行 `r_p`（p ∈ P）。则
-   `z ∈ span(B)` ⟺ 对每个自由列 `f ∈ F`：
-   `z_f ⊕ Σ_{p ∈ P} (r_p)_f · z_p = 0`。
+   **Lemma 1.3.c (parametrization of the RREF row space by the free columns)**: let B be reduced to RREF with
+   "pivot = lowest set bit, full elimination", giving pivot columns P, free columns F = [n]∖P and rows
+   `r_p` (p ∈ P). Then `z ∈ span(B)` ⟺ for every free column `f ∈ F`:
+   `z_f ⊕ Σ_{p ∈ P} (r_p)_f · z_p = 0`.
 
-   *证明*：(⊆) 对每个 RREF 行 `r_q`（主元 q）逐项验证：自由列 f 处 `(r_q)_f = (r_q)_f`；
-   而 `Σ_{p ∈ P} (r_p)_f · (r_q)_p` 中，完全消元使 `(r_q)_p = 1` 当且仅当 `p = q`，
-   故求和 = `(r_q)_f`，两式相等 ⇒ 该行满足方程。方程系统线性且被基满足 ⇒ 整个
-   span(B) 满足。(⊇) 每个自由变量 `z_f` 恰在一个方程中作为「唯一的自由项」出现，
-   故 |F| 个方程线性无关，解空间维数 = `n − |F| = |P| = k = dim span(B)`；维数相等的
-   包含即相等。∎
+   *Proof*: (⊆) check each RREF row `r_q` (pivot q) term by term: at a free column f `(r_q)_f = (r_q)_f`;
+   in `Σ_{p ∈ P} (r_p)_f · (r_q)_p`, full elimination makes `(r_q)_p = 1` iff `p = q`,
+   so the sum = `(r_q)_f`; the two sides are equal ⇒ the row satisfies the equation. The equation system is
+   linear and is satisfied by the basis ⇒ the whole span(B) satisfies it. (⊇) every free variable `z_f`
+   appears in exactly one equation as the "unique free term", so the |F| equations are linearly independent,
+   and the solution-space dimension = `n − |F| = |P| = k = dim span(B)`; an inclusion of equal dimension is
+   an equality. ∎
 
-3. 把 `z = x ⊕ a` 代入引理 1.3.c：`x ∈ a + K ⟺` 对每个 `f ∈ F`，
-   `x_f ⊕ Σ_{p∈P} (r_p)_f x_p = c_f`，其中 `c_f = a_f ⊕ Σ_{p∈P} (r_p)_f a_p`。
-4. 电路构造：对每个 `(p, f)` 满足 `(r_p)_f = 1` 施加 `CNOT(p → f)`。控制集 ⊆ P、
-   目标集 ⊆ F、`P ∩ F = ∅` ⇒ 无目标被后续用作控制 ⇒ 各 CNOT 互不干扰、任意顺序等价；
-   施加后自由坐标变为 `y_f = x_f ⊕ Σ_{p: (r_p)_f=1} x_p = x_f ⊕ Σ_{p∈P} (r_p)_f x_p`。
-   再施加控制集 F、极性 `c_f` 的 MCX：翻转目标 ⟺ `y_f = c_f`（∀f）⟺ `x ∈ a + K`。
-   反序重复 CNOT（推论 1.3.b）恢复输入，得到合法仿射块，控制数
-   `m = |F| = n − |P| = n − k`。∎
+3. Substitute `z = x ⊕ a` into Lemma 1.3.c: `x ∈ a + K ⟺` for every `f ∈ F`,
+   `x_f ⊕ Σ_{p∈P} (r_p)_f x_p = c_f`, where `c_f = a_f ⊕ Σ_{p∈P} (r_p)_f a_p`.
+4. Circuit construction: for each `(p, f)` with `(r_p)_f = 1` apply `CNOT(p → f)`. The control set ⊆ P,
+   the target set ⊆ F, and `P ∩ F = ∅` ⇒ no target is later used as a control ⇒ the CNOTs do not interfere
+   and any order is equivalent; after applying them the free coordinates become
+   `y_f = x_f ⊕ Σ_{p: (r_p)_f=1} x_p = x_f ⊕ Σ_{p∈P} (r_p)_f x_p`.
+   Then apply the MCX with control set F and polarities `c_f`: it flips the target ⟺ `y_f = c_f` (∀f) ⟺
+   `x ∈ a + K`. Repeating the CNOTs in reverse order (Corollary 1.3.b) restores the input, yielding a legal
+   affine block with control count `m = |F| = n − |P| = n − k`. ∎
 
-**(i) 最小控制数（二级结论，且比此前表述更强：是等号而非仅下界）**：先定义延拓代价
-`t̄(dim) := t(n − dim)`（dim ≥ 0）、`t̄(−1) := 0`。则对 dim = k ≥ 0：由必要性，
-任何实现该函数的仿射块满足 `n − m = k`，即 **m = n − k 是被迫的**，单块 T 代价
-`T = t(n − k) = t̄(k)`。对 dim = −1（f ≡ 0）：只有零块可实现，**MCX 缺省、m 无定义**
-（控制数公式 `m = n − k` 不适用于此情形，勿写作 `m = n + 1`），代价 `T = 0 = t̄(−1)`。
-综上 `T_min(f) = t̄(dim f)` 对全部 `dim ∈ {−1} ∪ [0, n]` 成立，且**每个**正确实现都达到它。
+**(i) Minimal control count (secondary conclusion, and stronger than the earlier statement: it is an
+equality, not merely a lower bound)**: first define the extended cost
+`t̄(dim) := t(n − dim)` (dim ≥ 0), `t̄(−1) := 0`. Then for dim = k ≥ 0: by necessity, any affine block
+realizing the function satisfies `n − m = k`, i.e. **m = n − k is forced**, and the single-block T cost
+`T = t(n − k) = t̄(k)`. For dim = −1 (f ≡ 0): only the zero block can realize it, **the MCX is omitted and m
+is undefined** (the control-count formula `m = n − k` does not apply to this case; do not write
+`m = n + 1`), cost `T = 0 = t̄(−1)`. In summary `T_min(f) = t̄(dim f)` holds for all
+`dim ∈ {−1} ∪ [0, n]`, and **every** correct realization attains it.
 
-**(ii) 规范构造达到下界且唯一（二级结论）**：
-- **达到**：充分性证明第 4 步给出 `m = n − k`。
-- **唯一/规范**：RREF 的经典唯一性——同一行空间的两个 RREF 完全相等（证明梗概：
-  主元位置由「第 j 列是否属于前 j−1 列张成的空间」唯一确定；主元列给定后，完全消元
-  使每个主元行在其主元处为 1、其余主元列为 0，由线性组合系数唯一确定行内容）。
-  我们外加的确定性约定（主元扫描序 = 列升序取最低置位；cnot_ops 按 (p,f) 升序；
-  controls 按 f 升序）使 §3.6 的输出成为 **(a, K)** 的**函数**——与输入基 B 的选择无关。
-  常数全部吸收进 MCX 极性（约定 `x_trans = 0`），故 `SyntheticPlan(0, cnot_ops, controls)`
-  可哈希、可判等，融合产物幂等重入池（同一 (a,K) 永远生成同一 plan）。∎
+**(ii) The canonical construction attains the lower bound and is unique (secondary conclusion)**:
+- **Attainment**: step 4 of the sufficiency proof gives `m = n − k`.
+- **Uniqueness/canonicity**: classical uniqueness of RREF — two RREFs of the same row space are equal (proof
+  sketch: the pivot positions are uniquely determined by "whether column j lies in the space spanned by the
+  first j−1 columns"; once the pivot columns are given, full elimination makes each pivot row 1 at its pivot
+  and 0 in the other pivot columns, so the row contents are uniquely determined by the linear-combination
+  coefficients). Our additional deterministic conventions (pivot scan order = ascending columns taking the
+  lowest set bit; cnot_ops in ascending (p,f) order; controls in ascending f order) make the output of §3.6
+  a **function** of **(a, K)** — independent of the choice of input basis B. All constants are absorbed into
+  the MCX polarity (convention `x_trans = 0`), so `SyntheticPlan(0, cnot_ops, controls)` is hashable and
+  equality-comparable, and fusion products are idempotent on re-entry to the pool (the same (a,K) always
+  generates the same plan). ∎
 
-**推论（仿射立方函数的线性型刻画）**：维数 k 的仿射立方函数恰可写为
-`f(x) = Π_{j=1}^{n−k} [ℓ_j(x) = c_j]`，其中 `ℓ_j` 是 `n − k` 个线性无关的线性型
-（方向子空间 K 的零化子的一组基），`c_j = ℓ_j(a)`。（证明：充分性构造第 3 步的
-约束方程即取 `ℓ_f(x) = x_f ⊕ Σ_p (r_p)_f x_p`。）
+**Corollary (characterization of affine cube functions by linear forms)**: an affine cube function of
+dimension k is exactly one writable as `f(x) = Π_{j=1}^{n−k} [ℓ_j(x) = c_j]`, where the `ℓ_j` are
+`n − k` linearly independent linear forms (a basis of the annihilator of the direction subspace K),
+`c_j = ℓ_j(a)`. (Proof: the constraint equations of step 3 of the sufficiency construction are obtained by
+taking `ℓ_f(x) = x_f ⊕ Σ_p (r_p)_f x_p`.)
 
-**与 BDD 谱系的关系（忠实性说明，不属于定理内容）**：§1.1–§1.2 的
-Position / lim / weight / fallthrough 走线语义是 **A 路径抽取**对同一对象的另一套
-实现描述——每个走线型分支段逐层展开后恰为定理 1 中的三明治形态，故
-`extract_complete_branches`（`limbdd/Extraction.py`）的产出全部落入仿射立方函数族。
-实测：抽查 38 个真实抽取分支段，`supp(f)` 全部通过仿射判定（附录 A）。本定理的
-成立不依赖这一段历史论证。
+**Relation to the BDD lineage (faithfulness note, not part of the theorem content)**: the
+Position / lim / weight / fallthrough walk semantics of §1.1–§1.2 is another implementation-level
+description of the same object given by the **A-path extraction** — each walk-type branch segment, expanded
+level by level, is exactly the sandwich form of Theorem 1, hence the output of `extract_complete_branches`
+(`limbdd/Extraction.py`) lies entirely in the affine-cube-function family. Measured: for 38 sampled real
+extracted branch segments, every `supp(f)` passed the affine test (Appendix A). The theorem does not depend
+on this historical argument.
 
-**例**（纯 MCX 段，无任何 Lim）：控制集 C、极性向量 c，则 `supp = {x : x_C = c}`，
-`K = span{x_j : j ∉ C}`，`dim K = n − |C|`。
+**Example** (pure MCX segment, no Lim at all): control set C, polarity vector c, then
+`supp = {x : x_C = c}`, `K = span{x_j : j ∉ C}`, `dim K = n − |C|`.
 
-**例**（零块 / 常数段的两端）：全 ft 链零控制常数段支撑 `= V`、`dim K = n`（MCX 缺省
-的退化端之一）；零块支撑 `= ∅`、`dim = −1`（另一退化端）。
+**Example** (the two ends: zero block / constant segment): an all-ft chain with zero controls has support
+`= V`, `dim K = n` (one of the degenerate ends of MCX omission); the zero block has support `= ∅`,
+`dim = −1` (the other degenerate end).
 
-**例**（含条件翻转）：ft 层 `[x_var=0 → X(lim0)] ⊕ [x_var=1 → X(lim1)]` 对更深变量引入的翻转是
-`lim0 ⊕ x_var·(lim0⊕lim1)` —— 仿射依赖，因此仍保持"支撑 = 仿射子空间"。
+**Example** (with a conditional flip): the flip introduced on deeper variables by the ft level
+`[x_var=0 → X(lim0)] ⊕ [x_var=1 → X(lim1)]` is `lim0 ⊕ x_var·(lim0⊕lim1)` — an affine dependence, so
+"support = affine subspace" is preserved.
 
-### 1.3.1 单段 T 最优性引理（2025-08 增补；2025-08 修订为定理 1 之 (i)+(ii) 的直接重述）
+### 1.3.1 Single-segment T optimality lemma (2025-08 addition; 2025-08 revision: a direct restatement of
+Theorem 1 (i)+(ii))
 
-**命题**：若 `supp(f) = a + K`、`dim K = k`，则任何**单分支段**实现 f 的 MCX 控制数
-**恰为** `n − k`（等号被迫，非仅下界），且 §3.6 的 RREF 规范构造给出该实现。故单段
-T 代价 `T_min(f) = t(n − k)`，且每个正确实现都达到。
+**Proposition**: if `supp(f) = a + K`, `dim K = k`, then the MCX control count of any **single branch
+segment** realizing f is **exactly** `n − k` (the equality is forced, not merely a lower bound), and the RREF
+canonical construction of §3.6 gives that realization. Therefore the single-segment T cost is
+`T_min(f) = t(n − k)`, and every correct realization attains it.
 
-**证明**：即定理 1 的必要性（`n − m = k`）与充分性（构造达到 `n − k`）的直接组合；见
-定理 1 的 (i)、(ii)。零立方（dim = −1）情形无 MCX、控制数无定义，代价按 `t̄(−1) = 0`
-计（定理 1(i)）。
+**Proof**: the direct combination of Theorem 1's necessity (`n − m = k`) and sufficiency (the construction
+attains `n − k`); see Theorem 1 (i), (ii). The zero-cube (dim = −1) case has no MCX and an undefined control
+count; its cost is charged as `t̄(−1) = 0` (Theorem 1(i)).
 
-### 1.4 根边 Lim 与片间拼接
+### 1.4 Root-edge Lim and inter-piece concatenation
 
-每个子图（piece）的根边 Lim `r` 由该片的电路以三明治 `X(r) · (片内分支段) · X(r)` 实现。因此片内分支段函数 `f_A` 与整片函数的关系为
-`F_piece(x) = ⊕_A f_A(x ⊕ r)`。
+The root-edge Lim `r` of each subgraph (piece) is realized by the circuit as the sandwich
+`X(r) · (the piece's branch segments) · X(r)`. Hence the relation between the piece-internal segment function
+`f_A` and the whole-piece function is `F_piece(x) = ⊕_A f_A(x ⊕ r)`.
 
-两片拼接（根 Lim 分别为 `r_A, r_B`）时，一对分支段的净贡献为
+When two pieces (root Lims `r_A, r_B`) are concatenated, the net contribution of one pair of branch segments is
 
 ```
 X(r_A) F_A X(r_A) X(r_B) F_B X(r_B)
- = X(r_A) · F_A · X(r_A ⊕ r_B) · F_B · X(r_B)     （X 门群性质）
+ = X(r_A) · F_A · X(r_A ⊕ r_B) · F_B · X(r_B)     (group property of X gates)
 ```
 
-净翻转函数 = `f_A(x ⊕ r_A) ⊕ f_B(x ⊕ r_B)`。令 `y = x ⊕ r_A`，则
-`= f_A(y) ⊕ f_B(y ⊕ (r_A ⊕ r_B))`。**结论**：跨片融合的净函数支撑为
-`S_A △ (S_B ⊕ (r_A ⊕ r_B))`——即把 B 的支撑平移 `r_A ⊕ r_B` 后与 `S_A` 做对称差；
-各分支的方向子空间 K 在平移下不变。首尾剩余的 X 门组（`X(r_A)`、`X(r_B)`）是 T 免费的全局因子。
+The net flip function = `f_A(x ⊕ r_A) ⊕ f_B(x ⊕ r_B)`. Put `y = x ⊕ r_A`, then
+`= f_A(y) ⊕ f_B(y ⊕ (r_A ⊕ r_B))`. **Conclusion**: the support of the net function of cross-piece fusion is
+`S_A △ (S_B ⊕ (r_A ⊕ r_B))` — i.e. shift B's support by `r_A ⊕ r_B` and take the symmetric difference with
+`S_A`; the direction subspace K of each branch is invariant under translation. The leftover X-gate groups at
+the two ends (`X(r_A)`, `X(r_B)`) are T-free global factors.
 
-**平移敏感性（2025-08 修订，Phase 5 实现确认）**：K 不变不意味着"融合判定不变"——定理 2 的
-**陪集位置条件对平移敏感**：C3 的包含条件（`a_A⊕a_B ∈ K_大`）与 C4 的相交条件
-（`a_A⊕a_B ∈ K_A+K_B`）都会随 B 平移 `w = r_A⊕r_B` 而改变；因此 (A, B) 可融合不蕴含
-(A, B⊕w) 可融合，反之亦然。**跨片全局融合必须在平移后的有效函数
-`d' = f_A(x⊕r_A) ⊕ f_B(x⊕r_B)` 上重新做直接判定**（支撑 `S_A △ (S_B ⊕ (r_A⊕r_B))`，
-方向子空间与无平移时相同、仅 base 平移）——实现 `fuse_pool_global` 即如此。Phase 0 忽略根掩码的
-统计是"机会上限"口径；实测兑现（n=7 ΣT −21.9% vs 上界 19.8%）说明实际根掩码分布下平移破坏
-可融合性的情况稀少。
+**Translation sensitivity (2025-08 revision; confirmed by the current implementation)**: K invariance does
+**not** mean "the fusion decision is invariant" — the **coset-position conditions of Theorem 2 are
+translation-sensitive**: the inclusion condition of C3 (`a_A⊕a_B ∈ K_large`) and the intersection condition
+of C4 (`a_A⊕a_B ∈ K_A+K_B`) both change when B is shifted by `w = r_A⊕r_B`; hence fusibility of (A, B) does
+not imply fusibility of (A, B⊕w), and vice versa. **Global cross-piece fusion must re-run the direct decision
+on the shifted effective function `d' = f_A(x⊕r_A) ⊕ f_B(x⊕r_B)`** (support
+`S_A △ (S_B ⊕ (r_A⊕r_B))`, direction subspace the same as without the shift, only the base shifted) — the
+implementation `fuse_pool_global` in `backend/fusion/BranchFusion.py` does exactly this. The branch-probe
+statistics that ignored root masks are an "opportunity upper bound" statement; the realized figures (n=7
+ΣT −21.9% vs upper bound 19.8%) show that, under the actual root-mask distribution, shifts that destroy
+fusibility are rare.
 
 ---
 
-## 2. 仿射子空间的对称差分类（融合判据）
+## 2. Symmetric-difference classification of affine subspaces (the fusion criterion)
 
-### 2.1 基础运算
+### 2.1 Basic operations
 
-设 `S_1 = a_1 + K_1`，`S_2 = a_2 + K_2`，`k_i = dim K_i`，`W = K_1 ∩ K_2`，`m = dim W`。
+Let `S_1 = a_1 + K_1`, `S_2 = a_2 + K_2`, `k_i = dim K_i`, `W = K_1 ∩ K_2`, `m = dim W`.
 
-- 交集：非空时 `S_1 ∩ S_2` 是 W 的一个陪集，`|S_1 ∩ S_2| = 2^m`；为空 ⟺ `a_1 ⊕ a_2 ∉ K_1 + K_2`。
-- 平移：`S ⊕ v = (a ⊕ v) + K`。
-- 包含：`S_2 ⊆ S_1` ⟺ `K_2 ⊆ K_1` 且 `a_1 ⊕ a_2 ∈ K_1`。
+- Intersection: when nonempty, `S_1 ∩ S_2` is a coset of W, `|S_1 ∩ S_2| = 2^m`; empty ⟺
+  `a_1 ⊕ a_2 ∉ K_1 + K_2`.
+- Translation: `S ⊕ v = (a ⊕ v) + K`.
+- Inclusion: `S_2 ⊆ S_1` ⟺ `K_2 ⊆ K_1` and `a_1 ⊕ a_2 ∈ K_1`.
 
-**引理 2.0（余维 1 二陪集分解，2025-08 增补）**：设 `W ⊆ K` 为线性子空间且
-`dim W = dim K − 1`。则 K 恰为两个 W-陪集之并：`K = W ⊔ (u + W)`，其中
-`u ∈ K ∖ W` 任意。
+**Lemma 2.0 (codimension-1 decomposition into two cosets, 2025-08 addition)**: let `W ⊆ K` be linear
+subspaces with `dim W = dim K − 1`. Then K is exactly the union of two W-cosets: `K = W ⊔ (u + W)`, where
+`u ∈ K ∖ W` is arbitrary.
 
-**证明**：商空间 `K/W` 维数为 `dim K − dim W = 1`，故 `K/W ≅ GF(2)` 恰有 2 个元素，
-即 K 中恰有 2 个 W-陪集。W 本身是一个陪集；任取 `u ∈ K ∖ W`（`W ⊊ K` 保证非空），
-`u + W` 是另一陪集。二者不交：若 `x ∈ W ∩ (u+W)`，则存在 `w, w′ ∈ W` 使
-`x = w = u ⊕ w′`，得 `u = w ⊕ w′ ∈ W`，与 `u ∉ W` 矛盾。两个陪集互斥且
-`2 · |W| = |K|`，故 `K = W ⊔ (u + W)`。∎
+**Proof**: the quotient space `K/W` has dimension `dim K − dim W = 1`, so `K/W ≅ GF(2)` has exactly 2
+elements, i.e. K contains exactly 2 W-cosets. W itself is one coset; take any `u ∈ K ∖ W` (`W ⊊ K`
+guarantees it exists), `u + W` is the other coset. They are disjoint: if `x ∈ W ∩ (u+W)`, there exist
+`w, w′ ∈ W` with `x = w = u ⊕ w′`, giving `u = w ⊕ w′ ∈ W`, contradicting `u ∉ W`. The two cosets are
+mutually exclusive and `2 · |W| = |K|`, hence `K = W ⊔ (u + W)`. ∎
 
-### 2.2 定理 2（对称差分类——融合的充要条件）
+### 2.2 Theorem 2 (symmetric-difference classification — necessary and sufficient condition for fusion)
 
-**定理 2**：`S_1 △ S_2` 是仿射子空间，当且仅当下列四种情形之一成立：
+**Theorem 2**: `S_1 △ S_2` is an affine subspace if and only if one of the following four cases holds:
 
-| 情形 | 条件 | 结果 F = S₁ △ S₂ | dim F |
+| Case | Condition | Result F = S₁ △ S₂ | dim F |
 |---|---|---|---|
-| **C1** | `S_1 = S_2`（即 `K_1=K_2` 且 `a_1⊕a_2 ∈ K_1`） | **零立方**（恒零函数，`supp(F) = ∅`） | **−1** |
-| **C2** | `K_1 = K_2` 且 `S_1 ∩ S_2 = ∅`（即 `a_1⊕a_2 ∉ K_1`） | `a_1 + (K_1 + ⟨a_1⊕a_2⟩)` | `k_1 + 1` |
-| **C3** | 真嵌套且余维 1：`K_2 ⊊ K_1`，`dim K_2 = dim K_1 − 1`，且 `S_2 ⊆ S_1`（或对称） | `S_1 ∖ S_2` = `K_2` 在 `S_1` 中的另一个陪集（方向仍为 `K_2`） | `k_2 = k_1 − 1` |
-| **C4** | 交叉同维：`k_1 = k_2`，`m = k_1 − 1`，且互不包含 | `(t ⊕ u_1) + (W + ⟨u_1 ⊕ u_2⟩)`，其中 `t ∈ S_1∩S_2`，`u_1 ∈ K_1∖W`，`u_2 ∈ K_2∖W` | `k_1` |
+| **C1** | `S_1 = S_2` (i.e. `K_1=K_2` and `a_1⊕a_2 ∈ K_1`) | **zero cube** (identically-zero function, `supp(F) = ∅`) | **−1** |
+| **C2** | `K_1 = K_2` and `S_1 ∩ S_2 = ∅` (i.e. `a_1⊕a_2 ∉ K_1`) | `a_1 + (K_1 + ⟨a_1⊕a_2⟩)` | `k_1 + 1` |
+| **C3** | proper nesting with codimension 1: `K_2 ⊊ K_1`, `dim K_2 = dim K_1 − 1`, and `S_2 ⊆ S_1` (or symmetric) | `S_1 ∖ S_2` = the other coset of `K_2` inside `S_1` (direction still `K_2`) | `k_2 = k_1 − 1` |
+| **C4** | crossing, equal dimension: `k_1 = k_2`, `m = k_1 − 1`, and neither contains the other | `(t ⊕ u_1) + (W + ⟨u_1 ⊕ u_2⟩)`, where `t ∈ S_1∩S_2`, `u_1 ∈ K_1∖W`, `u_2 ∈ K_2∖W` | `k_1` |
 
-**证明**（必要性 + 充分性）。
+**Proof** (necessity + sufficiency).
 
-*充分性*：
+*Sufficiency*:
 
-- C1：平凡——`S_1 △ S_2 = ∅`，结果为零立方（dim −1，§0 对象族定义），对应零块。
-- C2：`S_1 ⊔ S_2 = a_1 + (K_1 ∪ (d + K_1))`，`d = a_1 ⊕ a_2`。只需证 `K ∪ (d+K) = K + ⟨d⟩`（即闭包性）：任取 `x, y ∈ K ∪ (d+K)`，
-  - 若同属 K：`x⊕y ∈ K`；同属 `d+K`：`(d+x')⊕(d+y') = x'⊕y' ∈ K`；
-  - 一属 K、一属 `d+K`：`d ⊕ x' ⊕ y ∈ d+K`。
-  故并集对 ⊕ 封闭且含 0，是子空间，且 `= K + ⟨d⟩`（维数 `k_1+1`，因为 `d ∉ K_1`）。∎
-- C3：`K_1 = K_2 ⊔ (u + K_2)`（余维 1），故 `S_1 ∖ S_2 = t + u + K_2` 为陪集。∎
-- C4：**第一步（u₁、u₂ 的存在性）**：C4 条件给出 `m = k_1 − 1 = k_2 − 1`，由引理 2.0，
-  `K_1 = W ⊔ (u_1 + W)`、`K_2 = W ⊔ (u_2 + W)`，`u_1 ∈ K_1∖W`、`u_2 ∈ K_2∖W` 存在。
-  **第二步（换代表，使两个分解共享同一 W-陪集）**：C4 的陪集相交条件
-  （`a_1 ⊕ a_2 ∈ K_1 + K_2`，等价于 `S_1 ∩ S_2 ≠ ∅`）给出 `t ∈ S_1∩S_2`。陪集可用任意代表
-  元素表示，故 `S_1 = a_1+K_1 = t+K_1 = (t+W) ⊔ (t+u_1+W)`，`S_2 = a_2+K_2 = t+K_2 =
-  (t+W) ⊔ (t+u_2+W)`。
-  **第三步（公共部分恰为整个交，在对称差中消去）**：`W ⊆ K_1∩K_2` ⇒ `t+W ⊆ S_1∩S_2`；
-  又 `|S_1∩S_2| = 2^m = |t+W|`（§2.1 交集公式），故 `S_1∩S_2 = t+W` 恰为整个交。于是
-  `S_1 △ S_2 = (t+u_1+W) ⊔ (t+u_2+W) = (t⊕u_1) + (W ∪ ((u_1⊕u_2)+W))`。
-  与 C2 同样的闭包论证：`W ∪ ((u_1⊕u_2)+W) = W + ⟨u_1⊕u_2⟩`；且 `u_1⊕u_2 ∉ W`
-  （若 `u_1⊕u_2 ∈ W ⊆ K_1`，则 `u_2 = u_1⊕w ∈ K_1∩K_2 = W`，与 `u_2 ∉ W` 矛盾），
-  故 `dim(W + ⟨u_1⊕u_2⟩) = k_1`，与 `dim F = k_1` 吻合。∎
+- C1: trivial — `S_1 △ S_2 = ∅`, the result is the zero cube (dim −1, §0 object-family definition),
+  corresponding to the zero block.
+- C2: `S_1 ⊔ S_2 = a_1 + (K_1 ∪ (d + K_1))`, `d = a_1 ⊕ a_2`. It remains to prove
+  `K ∪ (d+K) = K + ⟨d⟩` (i.e. closure): take any `x, y ∈ K ∪ (d+K)`,
+  - if both are in K: `x⊕y ∈ K`; both in `d+K`: `(d+x')⊕(d+y') = x'⊕y' ∈ K`;
+  - one in K, one in `d+K`: `d ⊕ x' ⊕ y ∈ d+K`.
+  Hence the union is closed under ⊕ and contains 0, so it is a subspace, and `= K + ⟨d⟩` (dimension
+  `k_1+1`, because `d ∉ K_1`). ∎
+- C3: `K_1 = K_2 ⊔ (u + K_2)` (codimension 1), so `S_1 ∖ S_2 = t + u + K_2` is a coset. ∎
+- C4: **Step 1 (existence of u₁, u₂)**: the C4 conditions give `m = k_1 − 1 = k_2 − 1`; by Lemma 2.0,
+  `K_1 = W ⊔ (u_1 + W)`, `K_2 = W ⊔ (u_2 + W)`, so `u_1 ∈ K_1∖W`, `u_2 ∈ K_2∖W` exist.
+  **Step 2 (re-represent so that both decompositions share the same W-coset)**: the coset-intersection
+  condition of C4 (`a_1 ⊕ a_2 ∈ K_1 + K_2`, equivalent to `S_1 ∩ S_2 ≠ ∅`) gives `t ∈ S_1∩S_2`. A coset can
+  be represented by any representative element, so `S_1 = a_1+K_1 = t+K_1 = (t+W) ⊔ (t+u_1+W)`,
+  `S_2 = a_2+K_2 = t+K_2 = (t+W) ⊔ (t+u_2+W)`.
+  **Step 3 (the common part is exactly the whole intersection and cancels in the symmetric difference)**:
+  `W ⊆ K_1∩K_2` ⇒ `t+W ⊆ S_1∩S_2`; moreover `|S_1∩S_2| = 2^m = |t+W|` (§2.1 intersection formula), so
+  `S_1∩S_2 = t+W` is exactly the whole intersection. Thus
+  `S_1 △ S_2 = (t+u_1+W) ⊔ (t+u_2+W) = (t⊕u_1) + (W ∪ ((u_1⊕u_2)+W))`.
+  The same closure argument as C2: `W ∪ ((u_1⊕u_2)+W) = W + ⟨u_1⊕u_2⟩`; and `u_1⊕u_2 ∉ W`
+  (if `u_1⊕u_2 ∈ W ⊆ K_1`, then `u_2 = u_1⊕w ∈ K_1∩K_2 = W`, contradicting `u_2 ∉ W`), so
+  `dim(W + ⟨u_1⊕u_2⟩) = k_1`, consistent with `dim F = k_1`. ∎
 
-*必要性*：设 `F = S_1 △ S_2` 为仿射子空间，维数 k。
+*Necessity*: suppose `F = S_1 △ S_2` is an affine subspace of dimension k.
 
-- 若 `S_1 = S_2`：C1。
-- 若 `S_1 ∩ S_2 = ∅`：`F = S_1 ⊔ S_2` 是仿射集且作为两个陪集的不交并覆盖 F。`|F| = 2^{k_1} + 2^{k_2} = 2^k`。若 `k_1 ≠ k_2`，令 `k_1 > k_2`，则 `2^k = 2^{k_2}(2^{k_1−k_2}+1)`，括号为大于 1 的奇数，矛盾；故 `k_1 = k_2` 且 `k = k_1 + 1`。此时 `S_1` 是 F 中余维 1 的陪集（`dim S_1 = k−1 = dim F − 1`），故 `F ∖ S_1 = S_2` 是 `K_1` 的另一个陪集（超平面陪集的补集恰为另一个陪集），从而 `S_2 = a' + K_1`，即 `K_2 = K_1`：C2。∎
-- 若 `S_1 ∩ S_2 ≠ ∅`（交集 `I = t + W`，`|I| = 2^m`）：
-  `|F| = 2^{k_1} + 2^{k_2} − 2^{m+1}`。设 `k_1 ≥ k_2`，写
-  `|F| = 2^{k_2} · (2^{k_1−k_2} + 1 − 2^{m+1−k_2})`。
-  - `m = k_2`（即 `S_2 ⊆ S_1`）：`|F| = 2^{k_1} + 2^{k_2} − 2^{k_2+1} = 2^{k_2}(2^{k_1−k_2} − 1)`，括号为奇数，是 2 的幂 ⟺ `= 1`，即 `k_1 = k_2 + 1`。此时 `|F| = 2^{k_2}`，`F = S_1 ∖ S_2` 是 `K_2` 的陪集（`K_2` 在 `K_1` 中余维 1，`K_1` 恰为 `K_2` 的两个陪集之并，去掉 `S_2` 即剩另一陪集）：C3。∎
-  - `m ≤ k_2 − 1`：`2^{m+1−k_2} ≤ 1`。若 `m ≤ k_2 − 2`，该数为真分数，括号不是整数，`|F|` 不是 2 的幂，矛盾；故必 `m = k_2 − 1`，括号 `= 2^{k_1−k_2}`，`|F| = 2^{k_1}`。
-    - 若 `k_1 > k_2`：给出反例排除（见下），矛盾；
-    - 若 `k_1 = k_2`：`m = k_1 − 1` 且互不包含：C4。∎
+- If `S_1 = S_2`: C1.
+- If `S_1 ∩ S_2 = ∅`: `F = S_1 ⊔ S_2` is an affine set and is covered as the disjoint union of two cosets.
+  `|F| = 2^{k_1} + 2^{k_2} = 2^k`. If `k_1 ≠ k_2`, let `k_1 > k_2`; then
+  `2^k = 2^{k_2}(2^{k_1−k_2}+1)`, whose parenthesized factor is an odd number greater than 1,
+  contradiction; hence `k_1 = k_2` and `k = k_1 + 1`. Now `S_1` is a codimension-1 coset inside F
+  (`dim S_1 = k−1 = dim F − 1`), so `F ∖ S_1 = S_2` is the other coset of `K_1` (the complement of a
+  hyperplane coset is exactly the other coset), hence `S_2 = a' + K_1`, i.e. `K_2 = K_1`: C2. ∎
+- If `S_1 ∩ S_2 ≠ ∅` (intersection `I = t + W`, `|I| = 2^m`):
+  `|F| = 2^{k_1} + 2^{k_2} − 2^{m+1}`. Assume `k_1 ≥ k_2` and write
+  `|F| = 2^{k_2} · (2^{k_1−k_2} + 1 − 2^{m+1−k_2})`.
+  - `m = k_2` (i.e. `S_2 ⊆ S_1`): `|F| = 2^{k_1} + 2^{k_2} − 2^{k_2+1} = 2^{k_2}(2^{k_1−k_2} − 1)`, the
+    parenthesized factor is odd, and it is a power of 2 ⟺ `= 1`, i.e. `k_1 = k_2 + 1`. Then
+    `|F| = 2^{k_2}`, `F = S_1 ∖ S_2` is a coset of `K_2` (`K_2` has codimension 1 in `K_1`, `K_1` is
+    exactly the union of the two cosets of `K_2`, removing `S_2` leaves the other coset): C3. ∎
+  - `m ≤ k_2 − 1`: `2^{m+1−k_2} ≤ 1`. If `m ≤ k_2 − 2`, that number is a proper fraction, the parenthesized
+    factor is not an integer, `|F|` is not a power of 2, contradiction; hence necessarily `m = k_2 − 1`, the
+    parenthesis `= 2^{k_1−k_2}`, `|F| = 2^{k_1}`.
+    - If `k_1 > k_2`: excluded by the counterexample below, contradiction;
+    - If `k_1 = k_2`: `m = k_1 − 1` and neither contains the other: C4. ∎
 
-*反例（排除 `k_1 > k_2, m = k_2 − 1`）*：`n = 3`，`S_1 = {x_3=0}`（平面，`K_1 = span{e_1,e_2}`，`a_1=0`），
-`S_2 = {x_1=x_2=0}`（直线，`K_2 = span{e_3}`，`a_2=0`）。则 `k_1=2, k_2=1, W = {0}, m=0=k_2−1`，互不包含，`S_1 ∩ S_2 = {000}`。
-`F = S_1△S_2 = {100, 010, 110, 001}`。取三点 `100 ⊕ 010 ⊕ 001 = 111 ∉ F`，F 不满足仿射集的闭包条件
-（仿射集 ⟺ `u,v,w ∈ F ⟹ u⊕v⊕w ∈ F`），故非仿射。且任意同类构型（`k_1=2, k_2=1, m=0`、互不包含）在仿射群作用下都与该标准构型等价，故此类**恒不**可融合。∎
+*Counterexample (excluding `k_1 > k_2, m = k_2 − 1`)*: `n = 3`, `S_1 = {x_3=0}` (a plane,
+`K_1 = span{e_1,e_2}`, `a_1=0`), `S_2 = {x_1=x_2=0}` (a line, `K_2 = span{e_3}`, `a_2=0`). Then
+`k_1=2, k_2=1, W = {0}, m=0=k_2−1`, neither contains the other, and `S_1 ∩ S_2 = {000}`.
+`F = S_1△S_2 = {100, 010, 110, 001}`. Taking the three points `100 ⊕ 010 ⊕ 001 = 111 ∉ F`, F does not
+satisfy the closure condition for affine sets (F is affine ⟺ `u,v,w ∈ F ⟹ u⊕v⊕w ∈ F`), so it is not affine.
+Moreover every configuration of the same type (`k_1=2, k_2=1, m=0`, neither contains the other) is equivalent
+to this standard configuration under the affine group, so this class is **never** fusible. ∎
 
-> 注：仿射集的闭包判据 `u⊕v⊕w ∈ F`（对任意三点）来源于：`F = a + K` ⟺ 平移后是子空间 ⟺ 对 ⊕ 封闭。该判据适用于**非空**仿射集；空集情形（C1）由 §0 的零立方定义单独处理。
+> Note: the closure criterion for affine sets `u⊕v⊕w ∈ F` (for any three points) comes from:
+> `F = a + K` ⟺ after translation it is a subspace ⟺ closed under ⊕. The criterion applies to **nonempty**
+> affine sets; the empty-set case (C1) is handled separately by the zero-cube definition of §0.
 
-### 2.3 融合判据的两种等价形式
+### 2.3 Two equivalent forms of the fusion criterion
 
-1. **直接判定**（Phase 0 使用，实现简单、恒正确）：计算 `d = f_A ⊕ f_B` 的支撑，检查 `supp(d)` 是否为仿射子空间（2.2 的闭包判据或高斯消元）。跨片时用平移后的 `d'`（§1.4 修订）。
-2. **结构判定**（匹配用，O(poly(n))）：按 §4.2 比较 `(a_i, K_i)`（含跨片平移 `r_A ⊕ r_B`），套用定理 2 的四情形。
+1. **Direct decision** (used by the branch probe; simple to implement and always correct): compute the
+   support of `d = f_A ⊕ f_B` and check whether `supp(d)` is an affine subspace (the closure criterion of 2.2
+   or Gaussian elimination). For cross-piece fusion use the shifted `d'` (§1.4 revision).
+2. **Structural decision** (for matching, O(poly(n))): compare `(a_i, K_i)` according to §4.2 (including the
+   cross-piece shift `r_A ⊕ r_B`) and apply the four cases of Theorem 2.
 
-**实现映射（2025-08 增补，`BranchFusion.four_case_kind` ↔ 定理 2）**：
+**Implementation mapping (2025-08 addition; `four_case_kind` in `backend/fusion/BranchFusion.py` ↔
+Theorem 2)**:
 
-| 代码编号 | 文档情形 | 条件 |
+| Code number | Document case | Condition |
 |---|---|---|
-| 1 | C1 + C2 | K_A = K_B（同陪集 → 抵消；异陪集 → C2 融合） |
-| 4 | C3 | K_B ⊊ K_A、dim 差 1、S_B ⊆ S_A（a_A⊕a_B ∈ K_A） |
-| 3 | C3 对称 | K_A ⊊ K_B、dim 差 1、S_A ⊆ S_B（a_A⊕a_B ∈ K_B） |
-| 2 | C4 | 同维、dim(K_A∩K_B) = k−1、陪集相交（a_A⊕a_B ∈ K_A+K_B） |
+| 1 | C1 + C2 | K_A = K_B (same coset → cancellation; different cosets → C2 fusion) |
+| 4 | C3 | K_B ⊊ K_A, dim difference 1, S_B ⊆ S_A (a_A⊕a_B ∈ K_A) |
+| 3 | C3 symmetric | K_A ⊊ K_B, dim difference 1, S_A ⊆ S_B (a_A⊕a_B ∈ K_B) |
+| 2 | C4 | equal dimensions, dim(K_A∩K_B) = k−1, cosets intersect (a_A⊕a_B ∈ K_A+K_B) |
 
-权威判定始终是直接判定（d 仿射）；四情形分类用于测试与桶预筛。
+The authoritative decision is always the direct decision (d affine); the four-case classification is used for
+testing and bucket prefiltering.
 
 ---
 
-## 3. 融合段的代数构造
+## 3. Algebraic construction of fused segments
 
-### 3.1 情形 C2 的构造（主融合情形）
+### 3.1 Construction for case C2 (the main fusion case)
 
-给定 `A, B`：`S_A = a_A + K`，`S_B = a_B + K`，`K_A = K_B = K`，`d = a_A ⊕ a_B ∉ K`。
-融合段函数 `g = f_A ⊕ f_B` 的支撑
-`F = a_A + (K + ⟨d⟩)`，`dim F = dim K + 1`。
+Given `A, B`: `S_A = a_A + K`, `S_B = a_B + K`, `K_A = K_B = K`, `d = a_A ⊕ a_B ∉ K`.
+The support of the fused-segment function `g = f_A ⊕ f_B` is
+`F = a_A + (K + ⟨d⟩)`, `dim F = dim K + 1`.
 
-**构造**：取 `K + ⟨d⟩` 的零化子的一组基 `ℓ_1, …, ℓ_{n−dim F}`（即 `n − dim K − 1` 个线性无关线性型，共同零点恰为 `K + ⟨d⟩`）。则
+**Construction**: take a basis `ℓ_1, …, ℓ_{n−dim F}` of the annihilator of `K + ⟨d⟩` (i.e.
+`n − dim K − 1` linearly independent linear forms whose common zero set is exactly `K + ⟨d⟩`). Then
 
 ```
 g(x) = Π_j [ℓ_j(x) = ℓ_j(a_A)]
 ```
 
-即：**对 x 施加线性坐标变换 L（前 `n − dim F` 个坐标取 `ℓ_j`，其余任补成基），一个
-`(n − dim F)` 控 MCX（控制极性 = `L(a_A)` 的前 `n − dim F` 位），再施加 L⁻¹**。
-变换 L 由 X/CNOT 门实现（§3.2），X/CNOT 的 T 代价为 0，故
+i.e.: **apply to x the linear coordinate change L (the first `n − dim F` coordinates are the `ℓ_j`, the rest
+completed arbitrarily to a basis), one `(n − dim F)`-controlled MCX (control polarities = the first
+`n − dim F` bits of `L(a_A)`), then L⁻¹**. The change L is realized by X/CNOT gates (§3.2), and X/CNOT have
+T cost 0, so
 
-**融合代价**：`T(g) = t(n − dim K − 1)`，收益 `= t(n − dim K_A) + t(n − dim K_B) − t(n − dim K − 1)`（`dim K_A = dim K_B = dim K`）。
+**Fusion cost**: `T(g) = t(n − dim K − 1)`, gain
+`= t(n − dim K_A) + t(n − dim K_B) − t(n − dim K − 1)` (`dim K_A = dim K_B = dim K`).
 
-**例（规则 2 特例）**：A 与 B 仅在变量 p 的 0/1 选择上不同（其余位置完全一致），设 A 在 p 处走 low（翻转掩码 `U_0`），B 走 high（翻转掩码 `U_1`）。则 `K_A = K_B`（方向子空间只由"哪些坐标被判定"决定，与翻转无关），且
-`d = a_A ⊕ a_B = e_p ⊕ (U_0 ⊕ U_1)`（`U_0⊕U_1` 只作用于 p 以下的更深变量）。融合段的**语法构造**与代数构造一致：p 处变为 ft 位置，`lim0 = U_0`、`lim1 = U_1`，其余位置不变——ft 的两个条件翻转
-`U_0 ⊕ x_p·(U_0⊕U_1)` 正是基变换所需的 X/CNOT 网络，MCX 控制数 = 原控制数 − 1。特例：`U_0 = U_1` 时 `d = e_p`，零化子基可取标准坐标函数，基变换恒等、**无任何额外翻转**。
+**Example (single differing coordinate)**: A and B differ only in the 0/1 choice at variable p (all other
+positions identical); suppose A goes low at p (flip mask `U_0`), B goes high (flip mask `U_1`). Then
+`K_A = K_B` (the direction subspace is determined only by "which coordinates are decided", not by the
+flips), and `d = a_A ⊕ a_B = e_p ⊕ (U_0 ⊕ U_1)` (`U_0⊕U_1` acts only on variables deeper than p). The
+**syntactic construction** of the fused segment agrees with the algebraic construction: position p becomes
+an ft position with `lim0 = U_0`, `lim1 = U_1`, and the other positions are unchanged — the ft's two
+conditional flips `U_0 ⊕ x_p·(U_0⊕U_1)` are exactly the X/CNOT network required by the basis change, and
+the MCX control count = original control count − 1. Special case: when `U_0 = U_1`, `d = e_p`, the
+annihilator basis can be taken as the standard coordinate functions, the basis change is the identity, and
+there is **no extra flip at all**.
 
-**例（规则 3 / pivot 楔形）**：A、B 为完全路径（无 ft），d 任意。差异坐标对应的 `ℓ_j` 一般不是单变量投影，需要 CNOT 基变换——这就是 `pivot_to` 中 x_map/cx_map 修正门的代数内容：CNOT 把"两个极性不同"的坐标合并为单一控制坐标。
+**Example (pivot wedge)**: A, B are complete paths (no ft), d arbitrary. The `ℓ_j` corresponding to the
+differing coordinates are generally not single-variable projections, so a CNOT basis change is needed —
+this is the algebraic content of the x_map/cx_map correction gates in `pivot_to` (in
+`limbdd/LimBDDManager.py`): the CNOTs merge two coordinates with different polarities into a single control
+coordinate.
 
-### 3.2 线性/仿射变换的 CNOT+X 可实现性
+### 3.2 Realizability of linear/affine maps by CNOT+X
 
-**定理 3**：GL(n,2) 由转置（transvection，即 `y_i ← y_i ⊕ y_j`，对应一个 CNOT 门）与坐标置换生成；整个仿射群由 CNOT 与 X 门生成。
+**Theorem 3**: GL(n,2) is generated by transvections (`y_i ← y_i ⊕ y_j`, one CNOT gate) and coordinate
+permutations; the whole affine group is generated by CNOT and X gates.
 
-**证明**：对任意可逆矩阵做高斯消元：行交换 = 坐标置换（电路上只是重命名，无需门）；行相加减 = 转置 = CNOT。故 `L` 可分解为 O(n²) 个 CNOT；常数平移 = X 门。∎
+**Proof**: run Gaussian elimination on any invertible matrix: row swaps = coordinate permutations (on a
+circuit this is only renaming, no gates); row adds/subtracts = transvections = CNOTs. Hence `L` decomposes
+into O(n²) CNOTs; a constant translation = X gates. ∎
 
-**推论**：任意仿射立方指示函数都可实现为"CNOT/X 网络 + 一个 MCX + 逆网络"的分支段形态；实现中网络按三明治展开（正网络、MCX、逆网络），保证输入恢复（对合性），段与段之间保持 XOR 可加性。
+**Corollary**: every affine-cube indicator function can be realized in the branch-segment form
+"CNOT/X network + one MCX + inverse network"; in the implementation the network is expanded as a sandwich
+(forward network, MCX, inverse network), which guarantees input restoration (involutivity), and segments
+preserve XOR additivity among themselves.
 
-### 3.3 情形 C3 的构造（嵌套余维 1）
+### 3.3 Construction for case C3 (nested codimension 1)
 
-`S_2 ⊊ S_1`，`K_2` 在 `K_1` 中余维 1，融合段 = `S_1 ∖ S_2`（**方向为 `K_2`，`dim = k_2 = k_1 − 1`**）。
-取 `ℓ` 为在 `K_2` 上为零、在 `K_1∖K_2` 上非零的线性型，则指示函数 = `1_{S_1}(x) · [ℓ(x) ≠ ℓ(t)]`（`t ∈ S_2`），仍为单 MCX（控制数 `n − k_2`）+ X/CNOT 基变换。代价 `t(n − k_2)`。
+`S_2 ⊊ S_1`, `K_2` has codimension 1 in `K_1`, fused segment = `S_1 ∖ S_2` (**direction `K_2`,
+`dim = k_2 = k_1 − 1`**). Take `ℓ` to be a linear form that is zero on `K_2` and nonzero on `K_1∖K_2`;
+then the indicator function = `1_{S_1}(x) · [ℓ(x) ≠ ℓ(t)]` (`t ∈ S_2`), still a single MCX (control count
+`n − k_2`) + X/CNOT basis change. Cost `t(n − k_2)`.
 
-**例**（n=2）：A = 常数 1 段（`S_A = V`，`k_1 = 2`，控制数 0），B = 单控制段 `[x_1 = 0]`（`S_B` 是超平面，`k_2 = 1`），则融合段 = `[x_1 = 1]`，控制数 `n − k_2 = 1`，CNOT 数 0。T：`t(0) + t(1) → t(1)`（本例收益为 0；C3 的收益 = A 段的 T，即 `t(n − k_1)`，因为 B 与融合段的控制数相同）。
+**Example** (n=2): A = the constant-1 segment (`S_A = V`, `k_1 = 2`, control count 0), B = the
+single-control segment `[x_1 = 0]` (`S_B` a hyperplane, `k_2 = 1`); the fused segment = `[x_1 = 1]`,
+control count `n − k_2 = 1`, CNOT count 0. T: `t(0) + t(1) → t(1)` (the gain in this example is 0; the gain
+of C3 = the T of segment A, i.e. `t(n − k_1)`, because B and the fused segment have the same control count).
 
-### 3.4 情形 C4 的构造（交叉同维）
+### 3.4 Construction for case C4 (crossing equal dimension)
 
-`F = (t⊕u_1) + (W + ⟨u_1⊕u_2⟩)`（定理 2），`dim F = k_1`。
-取 `W + ⟨u_1⊕u_2⟩` 的零化子基为控制坐标即可，同样单 MCX（控制数 `n − k_1`）+ X/CNOT 基变换。代价 `t(n − k_1)`。
+`F = (t⊕u_1) + (W + ⟨u_1⊕u_2⟩)` (Theorem 2), `dim F = k_1`.
+Take a basis of the annihilator of `W + ⟨u_1⊕u_2⟩` as the control coordinates; again a single MCX (control
+count `n − k_1`) + X/CNOT basis change. Cost `t(n − k_1)`.
 
-**例**（n=2）：A = `[x_1=0]`，B = `[x_2=0]`（两条过原点、方向不同的直线：`K_1=span{e_2}`，`K_2=span{e_1}`，`W={0}`，`m=0=k−1`）。`f_A⊕f_B = [x_1⊕x_2 = 1]`：1 个 CNOT（`y_1 ← x_1⊕x_2`）+ 1 控 MCX（`y_1=1`）。T：7+7 → 7。
+**Example** (n=2): A = `[x_1=0]`, B = `[x_2=0]` (two lines through the origin with different directions:
+`K_1=span{e_2}`, `K_2=span{e_1}`, `W={0}`, `m=0=k−1`). `f_A⊕f_B = [x_1⊕x_2 = 1]`: 1 CNOT
+(`y_1 ← x_1⊕x_2`) + 1-controlled MCX (`y_1=1`). T: 7+7 → 7.
 
-### 3.5 四种情形汇总（按"零化子"统一视角）
+### 3.5 Summary of the four cases (unified "annihilator" viewpoint)
 
-四种情形统一为：**融合段 = 仿射立方指示函数**；控制数 = `n − dim F`；X/CNOT 网络 = 把 F 的方向子空间零化子化到标准坐标的高斯消元。因此匹配与构造可共享同一个"方向子空间 + 陪集位置"的规范表示。
+The four cases unify as: **fused segment = affine-cube indicator function**; control count = `n − dim F`;
+the X/CNOT network = Gaussian elimination that maps the annihilator of F's direction subspace to standard
+coordinates. Therefore matching and construction can share the same canonical representation
+"direction subspace + coset position".
 
-### 3.6 RREF 规范构造（2025-08 增补：实现采用的构造）
+### 3.6 RREF canonical construction (2025-08 addition: the construction used by the implementation)
 
-**定理 3'（仿射立方 → 规范 SyntheticPlan）**：给定 d 的支撑 `e + K_f`（base `e` 与 `K_f` 的任意基 B，B 无需规范），存在**唯一确定**的合成段
+**Theorem 3′ (affine cube → canonical SyntheticPlan)**: given the support `e + K_f` of d (base `e` and any
+basis B of `K_f`, B not required to be canonical), there exists a **uniquely determined** synthetic segment
 
 ```
-CNOT 网络 → MCX(controls, ctrl_state) → CNOT 网络之逆
+CNOT network → MCX(controls, ctrl_state) → inverse CNOT network
 ```
 
-精确实现 d，且 `|controls| = n − dim K_f`（达到 §1.3.1 的最优）。构造步骤：
+that realizes d exactly, with `|controls| = n − dim K_f` (attaining the optimum of §1.3.1). Construction
+steps:
 
-1. 对 B 的行向量做 RREF（主元 = 最低位，**完全消元**：每个主元列对其余所有行清除），得主元列 P、自由列 F 与行 `r_p`（p ∈ P）；
-2. **约束行由自由列索引**（§1.2 隶属等价的关键方向）：`x ∈ e + K_f` ⟺ 对每个 `f ∈ F`：
+1. Put the row vectors of B into RREF (pivot = lowest bit, **full elimination**: each pivot column is
+   cleared in all other rows), obtaining pivot columns P, free columns F and rows `r_p` (p ∈ P);
+2. **constraint rows are indexed by the free columns** (the key direction of the membership equivalence in
+   §1.2): `x ∈ e + K_f` ⟺ for every `f ∈ F`:
 
    ```
    x_f ⊕ Σ_{p ∈ P} (r_p)_f · x_p = e_f ⊕ Σ_{p ∈ P} (r_p)_f · e_p =: c_f
    ```
 
-   （RREF 使每个主元行在其它主元列为 0，自由列可独立参数化；主元列值由行常数与自由列线性表出。）
-3. CNOT 网络：对每个置位 `(r_p)_f = 1` 加 `CNOT(p → f)`。**控制位全部是主元变量、目标位全部是自由变量**：主元变量全程不被修改，故各 CNOT 互不干扰、任意顺序等价；施加后 `y_f = x_f ⊕ Σ_p (r_p)_f x_p`；
-4. MCX：控制集 = 自由变量 F，极性 = `c_f`（常数全部吸收进 ctrl_state，无需 X 平移）；
-5. 反计算：CNOT 自逆，逆序重复，输入复原（三明治结构，§6.2 的对合要求）。
+   (RREF makes each pivot row 0 in the other pivot columns, so the free columns can be parametrized
+   independently; the pivot-column values are expressed linearly in terms of the row constants and the free
+   columns.)
+3. CNOT network: for each set bit `(r_p)_f = 1` add `CNOT(p → f)`. **Controls are all pivot variables and
+   targets are all free variables**: the pivot variables are never modified, so the CNOTs do not interfere
+   and any order is equivalent; after application `y_f = x_f ⊕ Σ_p (r_p)_f x_p`;
+4. MCX: control set = free variables F, polarities = `c_f` (all constants are absorbed into ctrl_state; no X
+   shift is needed);
+5. Uncomputation: CNOTs are self-inverse; repeat in reverse order, restoring the input (sandwich structure,
+   the involutivity requirement of §6.2).
 
-**正确性**：(2) 是子空间隶属的等价改写；(3) 的次序无关性来自"控制集 ∩ 目标集 = ∅"；(4) 极性吸收是 MCX ctrl_state 的定义；(5) 自逆性恢复输入。**维数核对**：`|controls| = |F| = n − dim K_f`。
+**Correctness**: (2) is the equivalent rewriting of subspace membership; the order-independence of (3) comes
+from "control set ∩ target set = ∅"; (4) polarity absorption is the definition of MCX ctrl_state; (5)
+self-inverseness restores the input. **Dimension check**: `|controls| = |F| = n − dim K_f`.
 
-**规范性与幂等性**：RREF（主元 = 最低位 + 完全消元）确定性；(cnot_ops 按 (p,f) 升序、controls 按 f 升序) 唯一。由定理 1(ii) 的 RREF 唯一性，输出只依赖 (e, K) 而**与所选基 B 无关**——同一 (e, K) 产同一合成段——融合产物可哈希、幂等，可安全重入融合池。
+**Canonicity and idempotence**: RREF (pivot = lowest bit + full elimination) is deterministic; (cnot_ops in
+ascending (p,f) order, controls in ascending f order) is unique. By the RREF uniqueness of Theorem 1(ii),
+the output depends only on (e, K) and **not on the chosen basis B** — the same (e, K) produces the same
+synthetic segment — so fusion products are hashable and idempotent, and can be re-entered into the fusion
+pool safely.
 
-**例（n=4, tt=42642，与 §7 同一对）**：`e = 0100`，`B = (0001, 1110)`。RREF：`r_0 = 0001`（主元 0）、`r_1 = 1110`（主元 1）→ P = {0,1}，F = {2,3}。约束行：
-`f=2: x2 ⊕ x1 = 1`；`f=3: x3 ⊕ x1 = 0`。合成段 = `CNOT(x1→x2), CNOT(x1→x3), MCX(x2=1, x3=0), 逆网络`。
-与 §7 的零化子形式 `[x1⊕x2=1]·[x2⊕x3=1]` 等价（同一函数的两种坐标选择；RREF 形式为规范形）。
+**Example (n=4, tt=42642, the same pair as §7)**: `e = 0100`, `B = (0001, 1110)`. RREF: `r_0 = 0001`
+(pivot 0), `r_1 = 1110` (pivot 1) → P = {0,1}, F = {2,3}. Constraint rows:
+`f=2: x2 ⊕ x1 = 1`; `f=3: x3 ⊕ x1 = 0`. Synthetic segment =
+`CNOT(x1→x2), CNOT(x1→x3), MCX(x2=1, x3=0), inverse network`.
+It is equivalent to the annihilator form `[x1⊕x2=1]·[x2⊕x3=1]` of §7 (two coordinate choices of the same
+function; the RREF form is the canonical one).
 
-### 3.7 各情形的代数闭式（2025-08 增补）
+### 3.7 Algebraic closed forms for each case (2025-08 addition)
 
-设 `reduce(·)` 为把向量组化为独立基（最低位主元）的规约。d 的支撑 `(e, B)` 可直接由 A、B 的 `(a, K)` 代数表出，无需枚举 2^n：
+Let `reduce(·)` be the reduction of a vector family to an independent basis (lowest-bit pivots). The support
+`(e, B)` of d can be expressed algebraically directly from the `(a, K)` of A and B, without enumerating 2^n:
 
-- **C2**（K_A = K_B = K，d≠0）：`e = a_A`，`B = reduce(K 的基 ∪ {a_A ⊕ a_B})`；
-- **C4**（同维相交）：取 `t ∈ S_A ∩ S_B`、`u_1 ∈ K_A∖W`、`u_2 ∈ K_B∖W`（W = K_A∩K_B），`e = t ⊕ u_1`，`B = reduce(W 的基 ∪ {u_1 ⊕ u_2})`；
-- **C3**（K_B ⊊ K_A 余维 1、S_B ⊆ S_A）：取 `w ∈ K_A∖K_B`，`e = a_B ⊕ w`，`B = K_B 的基`；对称情形同理；
-- **C1**：d = 0（抵消，无合成段）。
+- **C2** (K_A = K_B = K, d≠0): `e = a_A`, `B = reduce(basis of K ∪ {a_A ⊕ a_B})`;
+- **C4** (equal dimensions, crossing): take `t ∈ S_A ∩ S_B`, `u_1 ∈ K_A∖W`, `u_2 ∈ K_B∖W`
+  (W = K_A∩K_B), `e = t ⊕ u_1`, `B = reduce(basis of W ∪ {u_1 ⊕ u_2})`;
+- **C3** (K_B ⊊ K_A codimension 1, S_B ⊆ S_A): take `w ∈ K_A∖K_B`, `e = a_B ⊕ w`, `B = basis of K_B`;
+  the symmetric case is analogous;
+- **C1**: d = 0 (cancellation, no synthetic segment).
 
-当前实现（n ≤ 7）走 fn 路径（`d = f_A ⊕ f_B` → 支撑枚举 → 基规约 → §3.6），闭式用于测试交叉验证；n 增大后直接换用闭式。
+The production decision path is the closed form: `backend/fusion/ClosedForm.py` (`canonical_affine`,
+`fuse_closed`) is the decision-and-construction engine used by `fuse_pool` / `fuse_pool_global` in
+`backend/fusion/BranchFusion.py` (switched to the closed form in stage "T-1", and cross-validated by
+`tests/test_closed_form.py`). The old fn path (`fn()`, `is_affine_cube`, `affine_from_fn`, `shift_fn`) still
+exists and is used for `LIMBDD_FUSION_DEBUG=1` cross-checks and by research scripts.
 
-### 3.8 相邻包裹门的门级恒等式（2025-08 增补：`simplify_terms` 的代数依据）
+### 3.8 Gate-level identities for adjacent wrapper gates (2025-08 addition: algebraic basis of
+`simplify_terms`)
 
-拼接后的电路在段边界处会出现相邻的 X/CNOT 类翻转项（LimTerm），可按下列恒等式合并（均保语义）：
+At segment boundaries of a concatenated circuit, adjacent X/CNOT-type flip terms (LimTerm) appear and can
+be merged by the following identities (all semantics-preserving):
 
-1. `X(b1)·X(b2) = X(b1⊕b2)`——无条件 X 组线性合并（X 门对易、逐位异或）；
-2. `[c=p→b1]·[c=p→b2] = [c=p→b1⊕b2]`，前提 `c ∉ b1∪b2`——前项不翻转控制位，后项条件在合并前后不变；
-3. `[c=0→b]·[c=1→b] = X(b)`——同控制、异极性、同目标：两条件互斥且穷尽，合并为无条件 X；这是 §7.8 压缩表示中 `lim0∩lim1` 公共部分上提的**门级复现**；
-4. 合并后掩码为 0 的项删除。
+1. `X(b1)·X(b2) = X(b1⊕b2)` — unconditional X groups merge linearly (X gates commute; bitwise XOR);
+2. `[c=p→b1]·[c=p→b2] = [c=p→b1⊕b2]`, provided `c ∉ b1∪b2` — the earlier term does not flip the control
+   bit, so the condition of the later term is unchanged by the merge;
+3. `[c=0→b]·[c=1→b] = X(b)` — same control, opposite polarities, same target: the two conditions are
+   mutually exclusive and exhaustive, so they merge into an unconditional X; this is the gate-level
+   reproduction of lifting the common part `lim0∩lim1` in the compressed CompleteBranch representation
+   (`x_global` in `backend/CompleteBranch.py`);
+4. terms whose merged mask is 0 are deleted.
 
-**不合并**多控 X 的 ControlTerm：两个控制条件的 XOR 一般不再保持单项形式（合并会破坏 MCX 结构）。
-实现为 `MCXCircuit.simplify_terms()`，作用于整段拼接电路——段边界的相邻包裹门正是该 pass 的主要收益来源。
+**Do not merge** multi-control-X ControlTerms: the XOR of two control conditions generally no longer keeps
+the single-term form (merging would break the MCX structure).
+This is implemented as `simplify_terms()` in `circuit/MCXCircuit.py`, applied to the whole concatenated
+circuit — the adjacent wrapper gates at segment boundaries are the main source of gains of that pass.
 
 ---
 
-## 4. CompleteBranch 的代数表示与融合算法
+## 4. Algebraic representation of CompleteBranch and the fusion algorithm
 
-### 4.1 分支 → 代数表示
+### 4.1 Branch → algebraic representation
 
-每个分支段 A 对应一对数据：
+Each branch segment A corresponds to one pair of data:
 
-1. **发射签名**（§1.1 的 Position 序列；Lim 已换算到绝对变量位空间）；
-2. **代数表示** `(a_A, K_A)`：
-   - `a_A` = `supp(f_A)` 的规范平移（取字典序最小元，消歧）；
-   - `K_A` = `{x ⊕ a_A : x ∈ supp(f_A)}`，以**行简化阶梯（RREF）基**存储（唯一规范形）。
+1. **Emission signature** (the Position sequence of §1.1; Lim already converted to the absolute variable bit
+   space);
+2. **Algebraic representation** `(a_A, K_A)`:
+   - `a_A` = the canonical shift of `supp(f_A)` (the lexicographically smallest element, for
+     disambiguation);
+   - `K_A` = `{x ⊕ a_A : x ∈ supp(f_A)}`, stored as a **row-reduced echelon (RREF) basis** (unique
+     canonical form).
 
-二者关系：签名 → 函数 → 代数表示（§1.3 定理 1）；代数表示 → 融合段构造（§3）。
+Their relation: signature → function → algebraic representation (§1.3 Theorem 1); algebraic representation
+→ fused-segment construction (§3).
 
-### 4.2 匹配算法（结构判定）
+### 4.2 Matching algorithm (structural decision)
 
-对任意两段 A、B（必要时先用 `r_A ⊕ r_B` 平移 B 的支撑，§1.4）：
+For any two segments A, B (if necessary first shift B's support by `r_A ⊕ r_B`, §1.4):
 
-1. **C1/C2**：`K_A = K_B`（RREF 基相等）→ 恒可融合（相等则抵消，否则 C2 构造）。
-2. **C3**：`K_B ⊊ K_A`（子空间判据：`K_B` 的基都在 `K_A` 中）且 `dim K_B = dim K_A − 1` 且 `S_B ⊆ S_A`（`a_A ⊕ a_B ∈ K_A`）；对称情形同理。
-3. **C4**：`dim K_A = dim K_B`，`dim(K_A ∩ K_B) = k − 1`，且互不包含。
-4. 其余情形不融合。
+1. **C1/C2**: `K_A = K_B` (RREF bases equal) → always fusible (if equal then cancellation, otherwise the C2
+   construction).
+2. **C3**: `K_B ⊊ K_A` (subspace criterion: every basis vector of `K_B` lies in `K_A`) and
+   `dim K_B = dim K_A − 1` and `S_B ⊆ S_A` (`a_A ⊕ a_B ∈ K_A`); the symmetric case is analogous.
+3. **C4**: `dim K_A = dim K_B`, `dim(K_A ∩ K_B) = k − 1`, and neither contains the other.
+4. All other cases do not fuse.
 
-复杂度：规范基 n×n 位矩阵上的 O(n²) 位运算；配合"K 的 RREF 哈希"分桶，池内匹配接近线性（仅跨桶检查 2、3 两类）。
+Complexity: O(n²) bit operations on n×n bit matrices of canonical bases; together with bucketing by "RREF
+hash of K", pool matching is near-linear (only cases 2 and 3 are checked across buckets).
 
-### 4.3 不变量与终止性
+### 4.3 Invariants and termination
 
-- **不变量**：池的 XOR 和 `⊕ f` 在每次 `{A,B} → {A⊕B}` 替换下不变（GF(2) 加法交换律/结合律；§3 构造保证新段函数精确等于 `f_A ⊕ f_B`）。
-- **终止性**：每次融合使段数减 1（C1 减 2），段数有限，必终止。
-- **代价模型**：贪心接受条件 `gain = t̄(dim K_A) + t̄(dim K_B) − t̄(dim F) > 0`，其中
-  `t̄(d) := t(n − d)`（d ≥ 0）为延拓代价（X/CNOT 不计 T；若计 CNOT 则把基变换网络规模计入）。
-- **退化维数约定（2025-08 增补，与 §0 对象族定义一致）**：`dim F = −1`（C1）时按
-  §0 约定 `t̄(−1) := 0`（零块代价 0），于是统一公式
-  `gain = t̄(dim K_A) + t̄(dim K_B) − t̄(dim F)` 对 C1 也成立，抵消收益 = `t_A + t_B`；
-  对零函数约定 `deg 0 := −1`，引理 D1 的下界 `t(deg f)` 对 f ≡ 0 平凡成立。实现口径
-  与之一致：`is_affine_cube` 对 `fn == 0` 返回 `(True, −1)`，`fuse_closed` 的 cancel
-  分支返回 `dim = −1`，`config.t_cost(0) = 0`。
+- **Invariant**: the XOR sum `⊕ f` of the pool is unchanged under every `{A,B} → {A⊕B}` replacement
+  (commutativity/associativity of GF(2) addition; the §3 construction guarantees the new segment's function
+  equals `f_A ⊕ f_B` exactly).
+- **Termination**: every fusion reduces the segment count by 1 (C1 reduces it by 2); the segment count is
+  finite, so termination is inevitable.
+- **Cost model**: greedy acceptance condition `gain = t̄(dim K_A) + t̄(dim K_B) − t̄(dim F) > 0`, where
+  `t̄(d) := t(n − d)` (d ≥ 0) is the extended cost (X/CNOT are not counted in T; if CNOTs were counted, the
+  basis-change network size would enter).
+- **Degenerate-dimension convention (2025-08 addition, consistent with the §0 object-family definition)**:
+  when `dim F = −1` (C1), the §0 convention `t̄(−1) := 0` (zero-block cost 0) applies, so the unified
+  formula `gain = t̄(dim K_A) + t̄(dim K_B) − t̄(dim F)` also holds for C1, and the cancellation gain
+  = `t_A + t_B`; for the zero function the convention `deg 0 := −1` is used, so the degree lower bound
+  `t(deg f)` holds trivially for f ≡ 0. The implementation matches this: `is_affine_cube`
+  returns `(True, −1)` for `fn == 0`, the cancel branch of `fuse_closed` returns `dim = −1`, and
+  `config.t_cost(0) = 0`.
 
-### 4.4 成对完备性猜想（k-to-1 规则的可分解性）：部分结果与开问题（2025-08）
+### 4.4 Pairwise-completeness conjecture (decomposability of the k-to-1 rule): partial results and open
+problem (2025-08)
 
-**猜想**（k=3 基例）：若三个仿射立方 `S_1, S_2, S_3` 的 XOR 是仿射立方 `D = d₀ + L`，则必存在一对 (i,j) 满足 C1–C4（即 `S_i △ S_j` 为立方，2-to-1 可融合）。若基例成立，则一般 k 可归纳（每步融合一对，总和仍为 χ_D，池规模 −1，最终归并为单分支）。
+**Conjecture** (base case k=3): if the XOR of three affine cubes `S_1, S_2, S_3` is an affine cube
+`D = d₀ + L`, then there necessarily exists a pair (i,j) satisfying C1–C4 (i.e. `S_i △ S_j` is a cube,
+2-to-1 fusible). If the base case holds, the general k follows by induction (each step fuses one pair; the
+sum remains χ_D, the pool size drops by 1, and finally everything merges into a single branch).
 
-**已严格证明的部分**：
+**Parts already proved rigorously**:
 
-1. **覆盖引理（Fourier 支集）**：`K_i⊥ ⊆ L⊥ ∪ ⋃_{j≠i} K_j⊥`（对每个 i）。证明：取 `u ∈ K_i⊥ ∖ (L⊥ ∪ ⋃_{j≠i} K_j⊥)`，主方程 `Σ_i 2^{k_i}(−1)^{⟨u,a_i⟩}1_{K_i⊥} = 2^l(−1)^{⟨u,d₀⟩}1_{L⊥}` 在该点只剩一项非零，而右端为零（u ∉ L⊥），矛盾。
-2. **归约引理**：若存在 i 使 `L ⊆ K_i`，则成对完备性对该池成立。证明：商掉 L 后 D 为单点 δ（ANF 度 n−l），各 χ_j 商化为 (k_j−l) 维立方（度 n−k_j）；度匹配要求存在 j 使 `K_j = L` → `χ_j ⊕ χ_D` 为同方向两陪集之差 = L 陪集（C2 型可融合）；其余池仍是"和为立方"的新实例，归纳。
-3. **2-adic 估值引理**：包含-排斥 `2^l = Σ_i 2^{k_i} − 2ΣP + 4Q`（P、Q 为交的势，均 0 或 2 的幂）写作 `Σ ±2^{e_m} = 2^l` 后，最低估值项数奇偶由 l 决定（μ=l 时为奇，否则为偶）。
-4. **已证子情形**：
-   - 同维三立方（k₁=k₂=k₃=k）：`l=k` 时若非可融合则每对交 ≤ 2^{k−2}，与 `ΣP − 2Q = 2^k` 矛盾 → 必存在 C4 对；`l=k+1` 且 **D=全空间** 时重数分析（`N₂+2N₃ = 2^k` 且 `Q = 2^{k−1} > P_max`）矛盾。
-   - 唯一最小维（k₁ < k₂ ≤ k₃）：估值引理强制 `l = k₁`；`B∩C=∅` 分支由 `|B△C| ≤ 2^{k₁+1}` 强制 k₂=k₃=k₁+1 且 A 各含 B、C 之半，与 B∩C=∅ 矛盾；`B∩C≠∅` 分支强制 `B ⊆ C`、`k₃=k₂+1` → C3 可融合。
+1. **Covering lemma (Fourier support)**: `K_i⊥ ⊆ L⊥ ∪ ⋃_{j≠i} K_j⊥` (for every i). Proof: take
+   `u ∈ K_i⊥ ∖ (L⊥ ∪ ⋃_{j≠i} K_j⊥)`; in the main equation
+   `Σ_i 2^{k_i}(−1)^{⟨u,a_i⟩}1_{K_i⊥} = 2^l(−1)^{⟨u,d₀⟩}1_{L⊥}` only one term on the left is nonzero at
+   that point, while the right side is zero (u ∉ L⊥), contradiction.
+2. **Reduction lemma**: if there exists i with `L ⊆ K_i`, then pairwise completeness holds for that pool.
+   Proof: after quotienting by L, D becomes a single point δ (ANF degree n−l), each χ_j quotients to a
+   (k_j−l)-dimensional cube (degree n−k_j); degree matching requires some j with `K_j = L` →
+   `χ_j ⊕ χ_D` is the difference of two same-direction cosets = a coset of L (C2-type fusible); the
+   remaining pool is still a new instance of "sum is a cube", so induction applies.
+3. **2-adic valuation lemma**: inclusion-exclusion `2^l = Σ_i 2^{k_i} − 2ΣP + 4Q` (P, Q are intersection
+   cardinalities, each 0 or a power of 2) written as `Σ ±2^{e_m} = 2^l`; then the parity of the number of
+   lowest-valuation terms is determined by l (odd when μ=l, even otherwise).
+4. **Proved subcases**:
+   - Three cubes of equal dimension (k₁=k₂=k₃=k): for `l=k`, if no pair is fusible then every pairwise
+     intersection ≤ 2^{k−2}, contradicting `ΣP − 2Q = 2^k` → a C4 pair must exist; for `l=k+1` and
+     **D = the whole space**, the multiplicity analysis (`N₂+2N₃ = 2^k` and `Q = 2^{k−1} > P_max`) gives a
+     contradiction.
+   - Unique smallest dimension (k₁ < k₂ ≤ k₃): the valuation lemma forces `l = k₁`; in the `B∩C=∅` branch,
+     `|B△C| ≤ 2^{k₁+1}` forces k₂=k₃=k₁+1 and A contains half of each of B and C, contradicting B∩C=∅; in
+     the `B∩C≠∅` branch, it forces `B ⊆ C`, `k₃=k₂+1` → C3 fusible.
 
-**未闭合的情形**：同维 `l=k+1` 且 **D 为真立方**（受限陪集版本，各 `S_i∩(d₀+L)` 方向退化为 `K_i∩L`，重数方程复杂化）；双最小维子情形（k₁=k₂<k₃，`ΣP ≡ 2Q (mod 2^k)` 的中间分支未逐一排除）；一般 k ≥ 4 的归约（仅归约引理 2 可桥接部分情形）。
+**Unclosed cases**: equal dimensions with `l=k+1` and **D a proper cube** (the restricted-coset version,
+where each `S_i∩(d₀+L)` has direction degenerating to `K_i∩L`, complicates the multiplicity equation); the
+double-smallest-dimension subcase (k₁=k₂<k₃, the intermediate branch of `ΣP ≡ 2Q (mod 2^k)` not yet
+eliminated one by one); and the reduction for general k ≥ 4 (only Reduction Lemma 2 bridges some cases).
 
-**反例构造尝试**（全部失败，弱证据）：三条两两不交且方向相异的直线（d 恒非 2 的幂）；两线交一点、第三线分离（交点对恰为 C4）；三超平面陪集（2-adic 方程不闭合）；线⊂面⊂体嵌套（嵌套余维 1 强制 C3）。每类构型要么破坏"d 为立方"，要么必然暴露 C1/C3/C4 对。
+**Counterexample attempts** (all failed, weak evidence): three pairwise disjoint lines with different
+directions (d is never a power of 2); two lines meeting in one point and a third separated line (the meeting
+pair is exactly C4); three hyperplane cosets (the 2-adic equation does not close); line⊂plane⊂space nesting
+(nested codimension 1 forces C3). Each type of configuration either breaks "d is a cube" or necessarily
+exposes a C1/C3/C4 pair.
 
-**随机搜索**（脚本 `experiments/counterexample_search.py`，见附录 F）：
+**Random search** (script `experiments/counterexample_search.py`, see Appendix F):
 
-| n | 三元组数 | d-仿射候选 | 反例 |
+| n | number of triples | d-affine candidates | counterexamples |
 |---|---|---|---|
 | 5 | 40000 | 1180 (2.95%) | **0** |
 | 6 | 40000 | 295 (0.74%) | **0** |
-| 7 | 10000 + 100000（补充） | 23 + 206 | **0** |
+| 7 | 10000 + 100000 (supplementary) | 23 + 206 | **0** |
 
-**结论**：猜想未被推翻、亦未证成，仍为开问题。**工程影响为零**——融合后端的正确性、终止性与全部已测收益不依赖该猜想；它只决定 2-to-1 贪心是否理论上可达所有 k-to-1 机会（决策建议见文末）。
+**Conclusion**: the conjecture has not been disproved, but has not been proved either; it remains an open
+problem. **The engineering impact is zero** — the correctness, termination and all measured gains of the
+fusion backend do not depend on the conjecture; it only decides whether the 2-to-1 greedy is theoretically
+able to reach all k-to-1 opportunities.
 
 ---
 
-## 5. 与 SplitPattern 的代数对应
+## 5. Algebraic correspondence with SplitPattern
 
-### 5.1 同一恒等式的两种调度
+### 5.1 Two schedulings of the same identity
 
-SplitPattern 在图上识别分支对并"拆分"；分支融合在池中识别分支对并"融合"。二者是恒等式
-`{A, B} → {A⊕B}` 的两种记账方式：
+SplitPattern recognizes branch pairs on the graph and "splits" them; branch fusion recognizes branch pairs
+in the pool and "fuses" them. They are two bookkeeping forms of the identity
+`{A, B} → {A⊕B}`:
 
-- **拆分**：把 `A⊕B` 物化为独立子图（片），A、B 在原图中被改写为不含共享部分的残段；
-- **融合**：把 `A⊕B` 留在池中作为一个段。
+- **Splitting**: materializes `A⊕B` as an independent subgraph (piece), while A and B are rewritten in the
+  original graph as residual segments not containing the shared part;
+- **Fusion**: keeps `A⊕B` in the pool as one segment.
 
-由于池的 XOR 和在两种记账下相同，**代数上完全等价**。
+Since the XOR sum of the pool is the same under both bookkeeping forms, **the two are algebraically
+completely equivalent**.
 
-### 5.2 几何特征 → 代数特征
+### 5.2 Geometric features → algebraic features
 
-SplitPattern 各模式的识别条件翻译如下（`succ_l/succ_r` 为同一父结点的两个孩子）：
+The recognition conditions of each SplitPattern mode translate as follows (`succ_l/succ_r` are the two
+children of the same parent node):
 
-| 模式 | 几何条件 | 代数含义 | 对应定理情形 |
+| Pattern | Geometric condition | Algebraic meaning | Corresponding theorem case |
 |---|---|---|---|
-| type 1 | 两分支共享同一个孩子 | 共享后缀 C 保证 `K_A = K_PA ∩ K_C = K_PB ∩ K_C = K_B`（匹配的前缀使 `K_PA = K_PB`） | C1/C2；新片 = 融合段（ft 链 + C） |
-| type 2 | one-child + branch 共享孩子 | 一侧前缀退化（少一个自由度），同 type 1 的 K 相等 | C2 |
-| type 3 | one-child + fallthrough 共享孩子 | fallthrough 侧条件翻转被吸收进 ft，同 K 相等 | C2 |
-| type 4 | 两分支共享**两个**孩子 | 两分支仅极性不同：`d` 的支撑集中于差异坐标（± 所走边 Lim 之差） | C1/C2（基变换网络很小） |
-| type 5 | 双 fallthrough 且 `lim_sum` 汉明重 ≤ 2 | `d = a_A⊕a_B` 支持小（≤2 位），基变换仅需 ≤2 个 CNOT | C2 |
+| type 1 | the two branches share the same child | the shared suffix C guarantees `K_A = K_PA ∩ K_C = K_PB ∩ K_C = K_B` (the matched prefixes make `K_PA = K_PB`) | C1/C2; new piece = fused segment (ft chain + C) |
+| type 2 | one-child + branch sharing the child | one side's prefix degenerates (one fewer degree of freedom), K equality as in type 1 | C2 |
+| type 3 | one-child + fallthrough sharing the child | the fallthrough side's conditional flip is absorbed into the ft, K equality as before | C2 |
+| type 4 | the two branches share **two** children | the two branches differ only in polarity: the support of `d` is concentrated on the differing coordinates (± the Lim difference of the edges taken) | C1/C2 (very small basis-change network) |
+| type 5 | double fallthrough and `lim_sum` Hamming weight ≤ 2 | `d = a_A⊕a_B` has small support (≤2 bits), the basis change needs at most ≤2 CNOTs | C2 |
 
-一般结论：**SplitPattern 的几何识别 ⟺ "方向子空间 K 相等"（及其两个边界情形 C3/C4）的代数识别**；拆出的新片函数 = 被识别分支对的 XOR（实测命中，附录 B）。
+General conclusion: **the geometric recognition of SplitPattern ⟺ the algebraic recognition
+"direction subspace K equal" (plus the two boundary cases C3/C4)**; the function of the split-off new piece
+= the XOR of the recognized branch pair (measured hits, Appendix B).
 
-### 5.3 规范化与不动点
+### 5.3 Canonicalization and fixed point
 
-图内 SplitPattern 的重写同时做 Lim 规范化（`eliminate_redundant_lim`、shift），使后续 K 相等对在语法上可见。代数层的对应物：
+The in-graph rewriting of SplitPattern simultaneously performs Lim canonicalization
+(`eliminate_redundant_lim`, shift), making subsequent K-equal pairs syntactically visible. The
+algebraic-layer counterpart:
 
-1. 每次融合后用 §4.1 重新规范 `(a, K)`（新段可能与其他段再次匹配）；
-2. 迭代到不动点（每轮段数严格减少，终止）；
-3. 与旧 SplitPattern 的等价性验收：新 pass 处理后池 XOR 不变、T 不升（差分验证）。
-
----
-
-## 6. 已知缺陷的代数解释
-
-### 6.1 `pivot_to` 对 one-child 位置不健全
-
-`pivot_to` 的楔形构造隐含假设两分支在每个位置都有两条权重 1 的边（完全分支）。对含 one-child 位置（w=0）的分支对，它按假想的边复制子图，结果函数 ≠ `f_A ⊕ f_B`。实测契约失败率：n=6 为 4/19，n=7 为 5/78（附录 C）。
-
-**代数上这不是融合理论的缺陷**：这类对只要 `supp(f_A ⊕ f_B)` 是仿射子空间（定理 2），§3 的构造仍然精确成立。因此通用融合必须按 §3/§4 原生实现，**不能**复用 `pivot_to` 的图级楔形。
-
-### 6.2 `get_pivot_to_circ` 修正门未反计算（ancilla=1 bug 的代数根源）
-
-pivot 的 x_map/cx_map 是实现 §3.2 基变换的 X/CNOT 网络。融合段要求**三明治结构**（正网络 → MCX → 逆网络），否则输入不复原。`get_pivot_to_circ` 只施加一次网络、从不反计算，且 `add_before=False` 时把网络追加在嵌套电路之后，导致：输入量子比特被污染，`compute_tt` 末态校验报 `Anomaly Found!!!`（复现：`input_state: 0 → output_state: 20`）。**教训**：任何融合段的 X/CNOT 基变换必须以对合三明治形式发射。
-
-### 6.3 窗口化子图的自由变量折叠
-
-split_neg 产生的片只覆盖部分变量（窗口化 var_order）。片函数对未覆盖变量**自由**：其方向子空间 K 包含所有未覆盖变量的单位向量。`LimBDD.get_truth_table()` 只写被覆盖变量的坐标位，等价于把自由变量折叠为 0，返回的是**限制函数**而非全空间函数。验证与代数表示必须用全空间函数：
-`f_full(x) = f_restricted(x & covered_mask)`。Phase 0 的全局验证（附录 A）用的就是全空间形式。
+1. after every fusion, re-canonicalize `(a, K)` with §4.1 (the new segment may match other segments again);
+2. iterate to a fixed point (each round strictly reduces the segment count, so it terminates);
+3. equivalence acceptance with the old SplitPattern: after the new pass the pool XOR is unchanged and T does
+   not increase (differential verification).
 
 ---
 
-## 7. 完整算例（真实数据，n=4, tt=42642）
+## 6. Algebraic explanation of the known defects
 
-**两个分支段**（来自 Phase 0 探针，Lim 已换算到绝对变量空间；位置元组 `(var, ft, bit, w0, w1, lim0, lim1)`）：
+### 6.1 `pivot_to` is unsound for one-child positions
+
+The wedge construction of `pivot_to` (in `limbdd/LimBDDManager.py`) implicitly assumes that the two branches
+have two weight-1 edges at every position (complete branches). For branch pairs containing one-child
+positions (w=0), it duplicates subgraphs along the imaginary edge, and the resulting function ≠ `f_A ⊕ f_B`.
+Measured contract-failure rates: 4/19 at n=6, 5/78 at n=7 (Appendix C).
+
+**Algebraically this is not a defect of the fusion theory**: for such pairs, as long as
+`supp(f_A ⊕ f_B)` is an affine subspace (Theorem 2), the §3 construction still holds exactly. Therefore
+general fusion must be implemented natively per §3/§4 and must **not** reuse the graph-level wedge of
+`pivot_to`.
+
+### 6.2 `get_pivot_to_circ` does not uncompute its correction gates (the algebraic root of the ancilla=1
+bug)
+
+The x_map/cx_map of pivot implement the X/CNOT network of the §3.2 basis change. A fused segment requires
+the **sandwich structure** (forward network → MCX → inverse network); otherwise the input is not restored.
+`get_pivot_to_circ` (in `backend/OracleSynthesizer.py`) applies the network only once and never uncomputes
+it, and with `add_before=False` it appends the network after the nested circuit, causing: the input qubits
+are polluted, and the final-state check of `compute_tt` reports `Anomaly Found!!!` (reproduction:
+`input_state: 0 → output_state: 20`). **Lesson**: any X/CNOT basis change of a fused segment must be
+emitted in the involutive sandwich form.
+
+### 6.3 Free-variable folding of windowed subgraphs
+
+The pieces produced by split_neg cover only part of the variables (windowed var_order). A piece function is
+**free** in the uncovered variables: its direction subspace K contains the unit vectors of all uncovered
+variables. `get_truth_table()` in `limbdd/LimBDD.py` writes only the coordinate bits of the covered
+variables, which is equivalent to folding the free variables to 0 and returns the **restricted function**,
+not the full-space function. Verification and the algebraic representation must use the full-space function:
+`f_full(x) = f_restricted(x & covered_mask)`. The global verification of the branch probe (Appendix A) uses
+exactly the full-space form.
+
+---
+
+## 7. Complete worked example (real data, n=4, tt=42642)
+
+**Two branch segments** (from the branch probe; Lim already converted to the absolute variable space;
+position tuple `(var, ft, bit, w0, w1, lim0, lim1)`):
 
 ```
-A: (1, 0, 0, 1, 1, 0, 4)   → 走 low，翻转 lim0=0，条件 x1=0
-   (3, 0, 0, 1, 0, 0, 0)   → 走 low（one-child），条件 x3=0
-   (0, 1, -, 1, 1, 0, 0)   → ft，lim0=lim1=0（恒等，不产生条件）
-   (2, 0, 1, 0, 1, 0, 0)   → 走 high（one-child），条件 x2=1
-B: (1, 0, 1, 1, 1, 0, 4)   → 走 high，翻转 lim1=4（即 X(x2)），条件 x1=1
-   (3, 0, 1, 1, 1, 0, 0)   → 走 high，条件 x3=1
-   (0, 1, -, 1, 1, 0, 0)   → ft，恒等
-   (2, 0, 1, 0, 1, 0, 0)   → 走 high，条件 (x2 ⊕ 1) == 1  ⟺ x2=0   ← 注意 B 在第 1 层的翻转改变了有效状态
+A: (1, 0, 0, 1, 1, 0, 4)   → goes low, flip lim0=0, condition x1=0
+   (3, 0, 0, 1, 0, 0, 0)   → goes low (one-child), condition x3=0
+   (0, 1, -, 1, 1, 0, 0)   → ft, lim0=lim1=0 (identity, produces no condition)
+   (2, 0, 1, 0, 1, 0, 0)   → goes high (one-child), condition x2=1
+B: (1, 0, 1, 1, 1, 0, 4)   → goes high, flip lim1=4 (i.e. X(x2)), condition x1=1
+   (3, 0, 1, 1, 1, 0, 0)   → goes high, condition x3=1
+   (0, 1, -, 1, 1, 0, 0)   → ft, identity
+   (2, 0, 1, 0, 1, 0, 0)   → goes high, condition (x2 ⊕ 1) == 1  ⟺ x2=0   ← note that B's flip at level 1 changed the effective state
 ```
 
-**步骤 1**（支撑）：`S_A = {0100, 0101}`，`S_B = {1010, 1011}`（二进制：x3 x2 x1 x0）。
-（B 的支持 x2=0 而非 x2=1，正是因为第 1 层的 `lim1=4` 在判定 x2 之前翻转了 x2——§1.2 有效状态演化。）
+**Step 1** (support): `S_A = {0100, 0101}`, `S_B = {1010, 1011}` (binary: x3 x2 x1 x0).
+(B's support is x2=0 rather than x2=1 precisely because level 1's `lim1=4` flips x2 before x2 is decided —
+§1.2 effective-state evolution.)
 
-**步骤 2**（方向子空间）：
-`a_A = 0100`，`K_A = {0000, 0001} = span{e_0}`（x0 自由，来自 ft 层）；
-`a_B = 1010`，`K_B = span{e_0}`。`K_A = K_B` ✓，`d = a_A ⊕ a_B = 1110 ∉ K` → 情形 **C2**。
+**Step 2** (direction subspace):
+`a_A = 0100`, `K_A = {0000, 0001} = span{e_0}` (x0 free, from the ft level);
+`a_B = 1010`, `K_B = span{e_0}`. `K_A = K_B` ✓, `d = a_A ⊕ a_B = 1110 ∉ K` → case **C2**.
 
-**步骤 3**（融合段支撑）：`F = a_A + (K + ⟨d⟩) = {0100, 0101, 1010, 1011}`。
+**Step 3** (fused-segment support): `F = a_A + (K + ⟨d⟩) = {0100, 0101, 1010, 1011}`.
 
-**步骤 4**（零化子）：`K + ⟨d⟩ = span{e_0, e_1⊕e_2⊕e_3}`（dim 2）。零化子基（控制坐标）取
-`ℓ_1 = x_1 ⊕ x_2`，`ℓ_2 = x_2 ⊕ x_3`（两者在 `e_0` 与 `e_1⊕e_2⊕e_3` 上均为 0）。在 `a_A = 0100` 上的取值为 `ℓ_1 = 1`、`ℓ_2 = 1`。
+**Step 4** (annihilator): `K + ⟨d⟩ = span{e_0, e_1⊕e_2⊕e_3}` (dim 2). Take the annihilator basis (control
+coordinates) `ℓ_1 = x_1 ⊕ x_2`, `ℓ_2 = x_2 ⊕ x_3` (both are 0 on `e_0` and on `e_1⊕e_2⊕e_3`). Their values
+at `a_A = 0100` are `ℓ_1 = 1`, `ℓ_2 = 1`.
 
-**步骤 5**（融合段）：
-`g(x) = [x_1⊕x_2 = 1] · [x_2⊕x_3 = 1]`：2 个 CNOT（`y_1 ← x_1⊕x_2`，`y_2 ← x_2⊕x_3`）+ 2 控 MCX（`y_1=1, y_2=1`）+ 逆 CNOT。等价写法 `[x_1⊕x_3 = 0] · [x_1⊕x_2 = 1]`。
-（§3.6 的 RREF 规范构造给出后一形式：`CNOT(x1→x2), CNOT(x1→x3), MCX(x2=1, x3=0), 逆网络`——同一函数，规范形唯一。）
+**Step 5** (fused segment):
+`g(x) = [x_1⊕x_2 = 1] · [x_2⊕x_3 = 1]`: 2 CNOTs (`y_1 ← x_1⊕x_2`, `y_2 ← x_2⊕x_3`) + 2-controlled MCX
+(`y_1=1, y_2=1`) + inverse CNOTs. Equivalent form `[x_1⊕x_3 = 0] · [x_1⊕x_2 = 1]`.
+(The RREF canonical construction of §3.6 gives the latter form:
+`CNOT(x1→x2), CNOT(x1→x3), MCX(x2=1, x3=0), inverse network` — the same function, unique canonical form.)
 
-**代价**：`T(A)+T(B) = 16 + 16 = 32` → `T(融合) = t(2) = 7`（2 个 CNOT 免费）。
+**Cost**: `T(A)+T(B) = 16 + 16 = 32` → `T(fused) = t(2) = 7` (the 2 CNOTs are free).
 
-**对照**：本例的差异由三部分组成——第 1 层极性差（x1）、第 2 层选择差（x3）与第 1 层所走边的翻转差 `U_0⊕U_1 = 4`（x2），三者之和恰为 `d = 1110`（§3.1 规则 2 的 `d = e_p ⊕ (U_0⊕U_1)` 是"只有一个差异位置"情形的特例）；基变换网络把这三个差异坐标合并成两个组合坐标后，MCX 控制数只由 `n − dim K − 1 = 2` 决定。
-
----
-
-## 8. 评审检查清单
-
-1. §1.3 定理 1：状态演化 `e_i` 的仿射归纳（ft 层 `A_var(z) = lim0 ⊕ z_var·(lim0⊕lim1)` 的仿射性）是否正确？
-2. §1.4 跨片平移公式 `f_B(y ⊕ (r_A⊕r_B))` 及"融合判定与根掩码无关"的论证是否正确？
-3. §2.2 定理 2 的分类是否完备？重点核对：
-   - C2 的闭包论证（`K ∪ (d+K) = K+⟨d⟩`）；
-   - 必要性中"相交情形"的势分析（`|F| = 2^{k1}+2^{k2}−2^{m+1}`，`m=k2` 与 `m=k2−1` 两分支）；
-   - 反例 `{100,010,110,001}` 的非仿射性及其仿射等价类论证；
-   - C4 的公式 `(t⊕u_1) + (W + ⟨u_1⊕u_2⟩)`。
-4. §3.1 零化子构造中控制数公式 `n − dim K − 1` 与各例核对（规则 2 的 d=e_p 情形、n=4 算例）。
-5. §3.2 定理 3：GL(n,2) 的转置生成与高斯消元分解。
-6. §3.3/3.4 边界情形 C3/C4 的控制数公式（C3 为 `n − k_2`、C4 为 `n − k_1`）与 n=2 例。
-7. §4.2 结构判定与定理 2 四情形的对应（特别注意 C3 的包含检验 `a_A⊕a_B ∈ K_A`、C4 的互不包含条件）。
-8. §5.2 模式翻译表：5 种 SplitPattern 模式是否都落入 C1–C4，有无遗漏的代数情形。
-9. §6 三个缺陷的代数解释（pivot 完全分支假设、对合三明治要求、自由变量折叠）。
-10. 附录 A–C 的实测数值与本文定理的一致性。
-11. （2025-08 增补）§1.3.1 单段 T 最优性引理：m 控制 ⇔ 支撑维数 n−m 的论证。
-12. （2025-08 增补）§3.6 RREF 规范构造：约束行"由自由列索引"的方向是否与隶属等价一致（主元行在其它主元列为 0）；CNOT 网络"控制=主元、目标=自由"的次序无关性；极性吸收常数；规范唯一性（完全消元 + 排序）。
-13. （2025-08 增补）§3.7 闭式：C2/C3/C4 的 `(e, B)` 公式与 §3.6 输入的对应；C1 的抵消语义。
-14. （2025-08 增补）§4.4 成对完备性猜想：覆盖引理、归约引理、2-adic 估值引理与已证子情形的推导；未闭合情形清单；附录 F 的搜索数据。
-14. （2025-08 增补）§1.4 平移敏感性：跨片融合必须在平移后 d' 上重新判定（C3/C4 的陪集位置条件对平移敏感；K 不变仅是必要条件的一部分）。
-15. （2025-08 增补）§2.3 映射表：代码 `four_case_kind` 1–4 与 C1–C4 的对应（3/4 互为对称），权威判定 = 直接判定。
-16. （2025-08 增补）§3.8 门级合并恒等式：三条 LimTerm 合并规则的保语义条件（尤其是"翻转位不含控制位"）与不合并 ControlTerm 的理由。
+**Comparison**: the difference in this example consists of three parts — the polarity difference at level 1
+(x1), the choice difference at level 2 (x3), and the flip difference `U_0⊕U_1 = 4` (x2) of the edges taken
+at level 1; the three sum exactly to `d = 1110` (the `d = e_p ⊕ (U_0⊕U_1)` formula of §3.1 is the special
+case of "only one differing position"); after the basis-change network merges the three difference
+coordinates into two composite coordinates, the MCX control count is determined solely by
+`n − dim K − 1 = 2`.
 
 ---
 
-## 附录
+## 8. Verification checklist
 
-### A. 分支段 = 仿射立方的实测
+1. §1.3 Theorem 1: is the affine induction on the state evolution `e_i` correct (the affinity of the ft
+   level `A_var(z) = lim0 ⊕ z_var·(lim0⊕lim1)`)?
+2. §1.4: is the cross-piece shift formula `f_B(y ⊕ (r_A⊕r_B))` and the argument "the fusion decision is
+   independent of the root mask" correct?
+3. §2.2 Theorem 2: is the classification complete? In particular check:
+   - the closure argument of C2 (`K ∪ (d+K) = K+⟨d⟩`);
+   - the cardinality analysis of the "intersecting case" in necessity
+     (`|F| = 2^{k1}+2^{k2}−2^{m+1}`, the two branches `m=k2` and `m=k2−1`);
+   - the non-affineness of the counterexample `{100,010,110,001}` and its affine-equivalence-class argument;
+   - the C4 formula `(t⊕u_1) + (W + ⟨u_1⊕u_2⟩)`.
+4. §3.1: check the control-count formula `n − dim K − 1` of the annihilator construction against each
+   example (the d=e_p case, the n=4 worked example).
+5. §3.2 Theorem 3: generation of GL(n,2) by transvections and the Gaussian-elimination decomposition.
+6. §3.3/3.4: the control-count formulas of the boundary cases C3/C4 (C3 is `n − k_2`, C4 is `n − k_1`) and
+   the n=2 examples.
+7. §4.2: correspondence of the structural decision with the four cases of Theorem 2 (in particular C3's
+   inclusion test `a_A⊕a_B ∈ K_A` and C4's mutual-non-containment condition).
+8. §5.2 pattern-translation table: do all 5 SplitPattern modes fall into C1–C4, and are there missing
+   algebraic cases.
+9. §6: the algebraic explanations of the three defects (pivot's complete-branch assumption, the involutive
+   sandwich requirement, free-variable folding).
+10. Appendices A–C: consistency of the measured numbers with the theorems of this document.
+11. (2025-08 addition) §1.3.1 single-segment T optimality lemma: the argument "m controls ⇔ support
+    dimension n−m".
+12. (2025-08 addition) §3.6 RREF canonical construction: is the direction "constraint rows indexed by free
+    columns" consistent with the membership equivalence (pivot rows are 0 in the other pivot columns); the
+    order-independence of the CNOT network "controls = pivots, targets = free"; polarity absorption of
+    constants; canonical uniqueness (full elimination + ordering).
+13. (2025-08 addition) §3.7 closed forms: correspondence of the C2/C3/C4 `(e, B)` formulas with the input
+    of §3.6; the cancellation semantics of C1.
+14. (2025-08 addition) §4.4 pairwise-completeness conjecture: derivation of the covering lemma, the
+    reduction lemma, the 2-adic valuation lemma and the proved subcases; the list of unclosed cases; the
+    search data of Appendix F.
+15. (2025-08 addition) §1.4 translation sensitivity: cross-piece fusion must re-decide on the shifted d'
+    (the coset-position conditions of C3/C4 are translation-sensitive; K invariance is only part of the
+    necessary condition).
+16. (2025-08 addition) §2.3 mapping table: correspondence of code `four_case_kind` 1–4 with C1–C4 (3/4 are
+    mirrors), authoritative decision = direct decision.
+17. (2025-08 addition) §3.8 gate-level merge identities: the semantics-preserving conditions of the three
+    LimTerm merge rules (especially "the flip bits do not include the control bit") and the reason not to
+    merge ControlTerm.
 
-方法：对随机 n=5 用例运行完整流水线图阶段，抽取全部 38 个分支段签名，用签名级模拟器计算每个 `f`（32 位真值表），以"支撑平移后对 XOR 封闭"判定仿射子空间。结果：**38/38 全部为仿射子空间**。
+---
 
-### B. SplitPattern 新片 = 分支对 XOR 的实测
+## Appendices
 
-方法：逐步执行 `SplitLv2Pattern`/`SplitInterceptorPattern`，每次拆分前后对图的分支函数池做差分，检查是否存在分支对 `(A,B)` 使 `f_A ⊕ f_B` 等于某个新片的函数。结果：命中 2 例（均为 SplitLv2Pattern，`dim(结果方向子空间) = 2`）。
+### A. Measurement: branch segments are affine cubes
 
-### C. pivot 契约实测（同图函数级可融合对）
+Method: run the complete-pipeline graph phase on a random n=5 case, extract all 38 branch-segment
+signatures, compute each `f` with the signature-level simulator (32-bit truth table), and decide "affine
+subspace" by "after translating the support, closed under XOR". Result: **38/38 are all affine subspaces**.
 
-方法：对同图可融合对执行 `pivot_to` + 嵌套综合，校验 `f_pivot(map(x)) == f_A(x) ⊕ f_B(x)`（128 位全空间）。
+### B. Measurement: SplitPattern new piece = XOR of a branch pair
 
-- n=6：19 对中 15 对成功、4 对失败（失败对含 one-child 位置）；成功对基线 `Σ2T = 2112 → 实测 626`（29.6%）。
-- n=7：78 对中 73 对成功、5 对失败；成功对基线 `Σ2T = 19668 → 实测 4558`（23.2%）。
+Method: step through `SplitLv2Pattern` / `SplitInterceptorPattern` (in `limbdd/patterns/`), and before/after
+each split take the difference of the graph's branch-function pool, checking whether there exists a branch
+pair `(A,B)` with `f_A ⊕ f_B` equal to the function of some new piece. Result: 2 hits (both were
+SplitLv2Pattern, `dim(result direction subspace) = 2`).
 
-### D. ancilla=1 缺陷复现
+### C. Measurement of the pivot contract (same-graph function-level fusible pairs)
 
-n=7、`ancilla_num=1`、40 随机例：2 例在 `compute_tt` 抛
-`Anomaly Found!!!  input_state: 0, output_state: 20, anc_state: 0`（输入量子比特被修正门污染，未反计算）。
+Method: for fusible pairs in the same graph, run `pivot_to` + nested synthesis and verify
+`f_pivot(map(x)) == f_A(x) ⊕ f_B(x)` (128-bit full space).
 
-### E. Phase 0 机会统计摘要（reorder=1，3462 例）
+- n=6: 15 of 19 pairs succeeded, 4 failed (the failing pairs contain one-child positions); baseline over
+  the successful pairs `Σ2T = 2112 → measured 626` (29.6%).
+- n=7: 73 of 78 pairs succeeded, 5 failed; baseline over the successful pairs
+  `Σ2T = 19668 → measured 4558` (23.2%).
 
-| n | 用例数 | 平均子图/分支 | 函数级可融合对 | 跨子图占比 | 贪心匹配收益 | 占基线 T |
+### D. Reproduction of the ancilla=1 defect
+
+n=7, `ancilla_num=1`, 40 random cases: 2 cases threw in `compute_tt`
+`Anomaly Found!!!  input_state: 0, output_state: 20, anc_state: 0` (input qubits polluted by the correction
+gates, not uncomputed).
+
+### E. Branch-probe opportunity-statistics summary (reorder=1, 3462 cases)
+
+| n | cases | avg subgraphs / branches | function-level fusible pairs | cross-subgraph share | greedy-match gain | share of baseline T |
 |---|---|---|---|---|---|---|
 | 4 | 2005 | 3.3 / 3.5 | 1219 | 100% | 2331 | 3.8% |
 | 5 | 1002 | 5.3 / 6.5 | 1139 | 100% | 9972 | 9.0% |
 | 6 | 303 | 8.1 / 11.7 | 546 | 96.5% | 12458 | 12.2% |
 | 7 | 152 | 12.8 / 22.1 | 539 | 85.5% | 37477 | 19.8% |
 
-（"函数级可融合对" = `supp(f_A ⊕ f_B)` 为仿射子空间的分支对，即定理 2 的直接判定。）
+("function-level fusible pair" = a branch pair with `supp(f_A ⊕ f_B)` an affine subspace, i.e. the direct
+decision of Theorem 2.)
 
-### F. 成对完备性反例搜索（2025-08，脚本 `experiments/counterexample_search.py`）
+### F. Pairwise-completeness counterexample search (2025-08, script `experiments/counterexample_search.py`)
 
-方法：随机生成三元组 CompleteBranch（随机 SyntheticPlan：X 平移 + CNOT 链 + 随机控制子集/极性），筛出 `d = f_1⊕f_2⊕f_3` 为仿射立方且三对两两均不可融合（`is_fusable=False`，即无 C1–C4 对）者 = 反例。输出文件：`experiments/phase0_results/cex_search_{n}_{seed}.txt`。
+Method: randomly generate triples of CompleteBranch (random SyntheticPlan: X shift + CNOT chain + random
+control subset/polarities), and filter those with `d = f_1⊕f_2⊕f_3` an affine cube and all three pairs
+pairwise non-fusible (`is_fusable=False`, i.e. no C1–C4 pair) = counterexample. Output files:
+`experiments/phase0_results/cex_search_{n}_{seed}.txt`.
 
-| n | seed | 三元组数 | d-仿射候选 | 候选 dim 分布 | 反例 |
+| n | seed | number of triples | d-affine candidates | candidate dim distribution | counterexamples |
 |---|---|---|---|---|---|
 | 5 | 1 | 40000 | 1180 (2.95%) | {−1:18, 0:8, 1:88, 2:248, 3:453, 4:350, 5:15} | **0** |
 | 6 | 2 | 40000 | 295 (0.74%) | {−1:1, 0:1, 1:11, 2:43, 3:76, 4:96, 5:66, 6:1} | **0** |
 | 7 | 3 | 10000 | 23 (0.23%) | {2:3, 3:2, 4:4, 5:6, 6:8} | **0** |
-| 7 | 4 | 100000（补充） | 206 (0.21%) | {0:1, 2:13, 3:50, 4:50, 5:62, 6:30} | **0** |
+| 7 | 4 | 100000 (supplementary) | 206 (0.21%) | {0:1, 2:13, 3:50, 4:50, 5:62, 6:30} | **0** |
 
-合计 190000 个随机三元组、1704 个 d-仿射候选，**零反例**——支持 §4.4 猜想为真，但随机搜索只提供经验证据；穷举（n ≤ 5 全部立方配置）或完整证明（§4.4 未闭合情形）仍待补。
+In total 190000 random triples and 1704 d-affine candidates, **zero counterexamples** — supporting the §4.4
+conjecture as true, but the random search provides only empirical evidence; exhaustive enumeration (all
+cube configurations for n ≤ 5) or a complete proof (the unclosed cases of §4.4) remains to be done.
