@@ -118,11 +118,11 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     paths            : single-path choice (exploration-phase discipline, default 'F'; only 'A'/'C'/'F'
                        are allowed, multi-path combinations are disabled at this stage; FP/G are selected via flags).
     m2_post=True     : macro M2 interleaved post-processing (**enabled by default**; zero regression on the T side
-                       case by case, 0 CX degradations across all n≤7 test cases; m2=0 is for debugging only and
-                       writes output files with the same names as the default scope, so do not mix it with official data).
+                       case by case, 0 CX degradations across all n≤7 test cases).
     Output files are named by path combination: `data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
-    tag = paths_tag(paths, fprm_proxy, gl_search) (since 2025-08-22 M2 is no longer distinguished:
-    the fused backend defaults to M2 strengthening, and historical data will be re-run).
+    tag = paths_tag(paths, fprm_proxy, gl_search). The default (m2_post=True) keeps the plain path tag;
+    m2_post=False (the no-macro-M2 comparison runs) appends the `_noM2` suffix to the tag so its outputs
+    never overwrite the default runs.
 
     Data layout (updated 2025-08-22):
       test cases  data/test_cases/test_cases_{n} (one truth-table integer per line)
@@ -147,7 +147,7 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                                           fused_backend=True, gl_search=gl_search,
                                           fprm_proxy=fprm_proxy, paths=paths,
                                           m2_post=m2_post)
-    tag = paths_tag(paths, fprm_proxy, gl_search)
+    tag = paths_tag(paths, fprm_proxy, gl_search) + ('' if m2_post else '_noM2')
 
     out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
     out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
@@ -206,6 +206,8 @@ def main():
     m2      = int(sys.argv[9]) if len(sys.argv) >= 10 else 1
     assert paths in ('A', 'C', 'F'), f'illegal paths (only single paths A/C/F allowed): {paths}'
     assert m2 in (0, 1), f'illegal m2 switch (0/1): {m2}'
+    # m2=1 (default) writes the plain path tag; m2=0 writes the `_noM2` suffix so the
+    # no-macro-M2 comparison runs never overwrite the default runs.
 
     if num_anc != 0:
         print('Warning: fused_backend only takes effect when ancilla_num=0 (currently anc>0, the old path will be used).')
