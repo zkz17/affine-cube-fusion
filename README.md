@@ -69,10 +69,18 @@ data/               test cases, baselines, and per-case results (see data/README
 ## Getting started
 
 ```bash
-./venv/bin/python test.py -f -b -a -c -g -e -p -q -r -s -d -x -u -w -m   # full test suite
-./venv/bin/python evaluate.py <n> 1 0 <start> <stop> <gl> <proxy> <paths> [m2]
-#   <paths> : A | C | F (single path); gl=1 selects G; proxy=1 with F selects FP
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+python test.py -f -b -a -c -g -e -p -q -r -s -d -x -u -w -m   # full test suite
+python evaluate.py <n> 1 0 <start> <stop> <gl> <proxy> <paths> [m2]
+#   <paths> : A | C | F (single path); gl=1 selects G; proxy=1 with F selects FP;
+#   m2=0 emits the no-macro-M2 comparison runs (tag suffix _noM2)
 ```
+
+Dependencies (numpy, qiskit, scipy) are declared in `requirements.txt`; the code is
+standard-library-only beyond that.
 
 The synthesizer is deterministic (no randomness in any path), asserts the pool XOR
 invariant under `LIMBDD_FUSION_DEBUG=1`, and every emitted circuit is verified against its
@@ -90,6 +98,7 @@ truth table (`compute_tt`).
 
 Precomputed outputs for the five pipelines over `n` up to 11, together with Exorcism and
 SSHR baselines and the test-case sets, live under `data/` (per-case T and CX costs under
-`data/our_cost/t_cost` and `data/our_cost/cx_cost`, degree bounds under
-`data/our_cost/deg_bound`, and per-run summaries `data/our_cost/our_results_*`). The
-format and file-naming conventions are documented in `data/README.md`.
+`data/our_cost/t_cost` and `data/our_cost/cx_cost`, one shared G-3 degree-bound file per
+`n` under `data/our_cost/deg_bound`, the no-macro-M2 comparison runs under
+`data/our_cost/no_M2`, and per-run summaries `data/our_cost/our_results_*`). The format,
+file-naming conventions and coverage are documented in `data/README.md`.

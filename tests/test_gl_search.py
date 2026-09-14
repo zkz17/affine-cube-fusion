@@ -24,7 +24,7 @@ def random_tt(num_vars):
 def test_gl_zero_regression(num_vars=5, rounds=40, verbose=False):
     """With gl enabled, T is never worse than the default path, case by case.
 
-    Note (2025-08-22): m2_post is enabled by default; this assertion keeps the **structural scope** —
+    Note: m2_post is enabled by default; this assertion keeps the **structural scope** —
     the comparison side uses m2_post=False explicitly (G candidates contain the FPRM-optimal cF ⇒ structural guarantee).
     G_on ≤ F_on with m2_post enabled on both sides is empirical (P9-M sample 46/46), not a constraint.
     """

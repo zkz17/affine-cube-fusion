@@ -14,7 +14,7 @@ def random_tt(num_vars):
 
 def _synth_pair(tt, reorder):
     old = OracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=False)
-    # Note (2025-08-22): multi-path combinations are disabled at this stage; this test verifies that the
+    # Note: multi-path combinations are disabled at this stage; this test verifies that the
     # **A-path fused backend** is no worse than the old backend — fusion only lowers or keeps T, and the
     # old backend emission cost = raw pool ΣT, so the fused cost with paths=('A',) is ≤ the old backend case by case.
     new = OracleSynthesizer(reorder=reorder, ancilla_num=0, fused_backend=True,
@@ -111,7 +111,7 @@ def test_flag_fallback(num_vars=5, rounds=20):
 
 
 def test_input_allocation_regression():
-    """Regression (2025-08-22): when the fused backend skipped construct, input qubits used to be lazily missing.
+    """Regression: when the fused backend skipped construct, input qubits used to be lazily missing.
 
     Example fn=64560 (n=4): the F path has cF=0 and the first segment only uses qubits 1/2/3,
     qubit 0 is never allocated, compute_tt enumerates in a 3-variable space, and the emitted

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Macro M2 production implementation (P9-finalized form, 2025-08-22).
+Macro M2 production implementation (P9-finalized form).
 
 Theory: docs/macro_m2_theory.md §2-3. For a δ=2 pair (A,B) and a candidate h (the classical
 exorlink divergent-literal family, P6a mechanism), first apply the two-sided rewrite

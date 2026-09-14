@@ -109,7 +109,7 @@ def test_global_backend_equivalence(num_vars=5, rounds=300, verbose=False):
     for i in range(rounds):
         tt = random_tt(num_vars)
         old = OracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=False)
-        # Note (2025-08-22): multi-path combinations are disabled; verify that the A-path fused backend ≤ the old backend
+        # Note: multi-path combinations are disabled; verify that the A-path fused backend ≤ the old backend
         # (fusion only lowers or keeps T, and the old backend = raw pool ΣT).
         new = OracleSynthesizer(reorder=(i % 2 == 1), ancilla_num=0, fused_backend=True,
                                       paths=('A',))

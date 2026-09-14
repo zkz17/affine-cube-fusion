@@ -2,18 +2,18 @@
 """
 CompleteBranch: the complete information of one branch (compressed representation).
 
-Naming note (2025-08): in the paper this object is called **Affine Block** -- the two names
+Naming note: in the paper this object is called **Affine Block** -- the two names
 denote the same concept. The algebraic essence is independent of the BDD lineage: an affine
 block is the indicator function of an affine subspace S = base + span(basis), together with
 its canonical emission plan (X/CNOT network + one MCX + inverse network); see
 docs/CompleteBranch_algebra.md (Theorem 1, Theorem 3').
 
-Zero-block convention (2025-08): the empty circuit is the *zero block*, realizing the
+Zero-block convention: the empty circuit is the *zero block*, realizing the
 identically-zero function; at the function level this is the "zero cube" of dimension -1
 (empty support). This matches is_affine_cube(fn==0) == (True, -1) and the cancellation
 branch (dim = -1) of ClosedForm.fuse_closed, keeping the cost formulas exception-free.
 
-Design: docs/architecture.md (2025-08 revision).
+Design: docs/architecture.md.
 
 Primary data (immutable; absolute variable bit space, bit k = variable k):
   mask      : int   walk-edge positions (MCX control variables) mask; 0 bits = fallthrough

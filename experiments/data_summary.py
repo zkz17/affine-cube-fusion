@@ -82,7 +82,7 @@ def main():
                              sshr_t=sshr_t, sshr_cx=sshr_cx))
     rows.sort(key=lambda r: (r['n'], r['tag']))
 
-    lines = ['Data summary (2025-08-24, fused backend = current production default, m2_post on)', '']
+    lines = ['Data summary (fused backend = current production default, m2_post on)', '']
     lines.append('=== ΣT(ours)===')
     lines.append('  n   ' + ' '.join(f'{t:>9}' for t in ('A', 'C', 'F', 'FP', 'G')))
     for n in sorted({r['n'] for r in rows}):

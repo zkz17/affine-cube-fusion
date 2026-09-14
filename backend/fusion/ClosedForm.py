@@ -33,7 +33,7 @@ form -- it is built from the free columns of an RREF and several basis vectors m
 lowest bit (`BranchFusion.four_case_kind` explicitly re-reduces for that reason). Therefore every
 entry point must go through `canonical_affine()`.
 
-Zero-cube convention (2025-08): case C1 (cancellation) returns dim = -1, the "zero cube" of
+Zero-cube convention: case C1 (cancellation) returns dim = -1, the "zero cube" of
 empty support, consistent with is_affine_cube(fn == 0) == (True, -1) and the zero block of
 docs/CompleteBranch_algebra.md §0; the unified gain formula tA + tB - t(n - dim F) then evaluates
 to tA + tB under the convention t(-1) = 0, so no special-casing is needed.

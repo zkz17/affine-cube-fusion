@@ -1,6 +1,6 @@
 # Algebraic Foundations of CompleteBranch Branch Fusion
 
-> **Naming note (2025-08)**: the code object `CompleteBranch` and the paper term **Affine Block** are
+> **Naming note**: the code object `CompleteBranch` and the paper term **Affine Block** are
 > two names for the same concept — the essence of the object is independent of the BDD lineage; it is
 > "the indicator function of an affine subspace + a canonical emission plan"
 > (Theorem 1 and Theorem 3′). The two terms are used interchangeably in this document.
@@ -28,7 +28,7 @@
 | `f_A` | flip function of branch segment A on the target bit (`f_A : V → GF(2)`) |
 | affine subspace | a set of the form `S = a + K`, K a linear subspace (the direction), a the shift; `dim S := dim K` |
 
-**Object-family definitions (2025-08 revision; used throughout the document)**:
+**Object-family definitions (used throughout the document)**:
 
 - **Affine cube function**: for dimension `k ≥ 0`, the indicator function `1_S` of an affine subspace
   `S = a + K` (`dim K = k`); **for dimension `k = −1`, the identically-zero function `0`** (support `∅`).
@@ -101,7 +101,7 @@ i+1). Level by level:
 - the decision condition of each non-ft level is `(e_{i-1})_{var} == bit`;
 - finally `f(x) = 1` ⟺ all non-ft decision conditions hold simultaneously.
 
-### 1.3 Theorem 1 (Affine Block ⟺ affine cube function: equivalence theorem, 2025-08 revision)
+### 1.3 Theorem 1 (Affine Block ⟺ affine cube function: equivalence theorem)
 
 **Theorem 1**:
 
@@ -222,7 +222,7 @@ on this historical argument.
 `[x_var=0 → X(lim0)] ⊕ [x_var=1 → X(lim1)]` is `lim0 ⊕ x_var·(lim0⊕lim1)` — an affine dependence, so
 "support = affine subspace" is preserved.
 
-### 1.3.1 Single-segment T optimality lemma (2025-08 addition; 2025-08 revision: a direct restatement of
+### 1.3.1 Single-segment T optimality lemma (a direct restatement of
 Theorem 1 (i)+(ii))
 
 **Proposition**: if `supp(f) = a + K`, `dim K = k`, then the MCX control count of any **single branch
@@ -253,7 +253,7 @@ The net flip function = `f_A(x ⊕ r_A) ⊕ f_B(x ⊕ r_B)`. Put `y = x ⊕ r_A`
 `S_A`; the direction subspace K of each branch is invariant under translation. The leftover X-gate groups at
 the two ends (`X(r_A)`, `X(r_B)`) are T-free global factors.
 
-**Translation sensitivity (2025-08 revision; confirmed by the current implementation)**: K invariance does
+**Translation sensitivity (confirmed by the current implementation)**: K invariance does
 **not** mean "the fusion decision is invariant" — the **coset-position conditions of Theorem 2 are
 translation-sensitive**: the inclusion condition of C3 (`a_A⊕a_B ∈ K_large`) and the intersection condition
 of C4 (`a_A⊕a_B ∈ K_A+K_B`) both change when B is shifted by `w = r_A⊕r_B`; hence fusibility of (A, B) does
@@ -278,7 +278,7 @@ Let `S_1 = a_1 + K_1`, `S_2 = a_2 + K_2`, `k_i = dim K_i`, `W = K_1 ∩ K_2`, `m
 - Translation: `S ⊕ v = (a ⊕ v) + K`.
 - Inclusion: `S_2 ⊆ S_1` ⟺ `K_2 ⊆ K_1` and `a_1 ⊕ a_2 ∈ K_1`.
 
-**Lemma 2.0 (codimension-1 decomposition into two cosets, 2025-08 addition)**: let `W ⊆ K` be linear
+**Lemma 2.0 (codimension-1 decomposition into two cosets)**: let `W ⊆ K` be linear
 subspaces with `dim W = dim K − 1`. Then K is exactly the union of two W-cosets: `K = W ⊔ (u + W)`, where
 `u ∈ K ∖ W` is arbitrary.
 
@@ -368,7 +368,7 @@ to this standard configuration under the affine group, so this class is **never*
 2. **Structural decision** (for matching, O(poly(n))): compare `(a_i, K_i)` according to §4.2 (including the
    cross-piece shift `r_A ⊕ r_B`) and apply the four cases of Theorem 2.
 
-**Implementation mapping (2025-08 addition; `four_case_kind` in `backend/fusion/BranchFusion.py` ↔
+**Implementation mapping (`four_case_kind` in `backend/fusion/BranchFusion.py` ↔
 Theorem 2)**:
 
 | Code number | Document case | Condition |
@@ -466,7 +466,7 @@ the X/CNOT network = Gaussian elimination that maps the annihilator of F's direc
 coordinates. Therefore matching and construction can share the same canonical representation
 "direction subspace + coset position".
 
-### 3.6 RREF canonical construction (2025-08 addition: the construction used by the implementation)
+### 3.6 RREF canonical construction (the construction used by the implementation)
 
 **Theorem 3′ (affine cube → canonical SyntheticPlan)**: given the support `e + K_f` of d (base `e` and any
 basis B of `K_f`, B not required to be canonical), there exists a **uniquely determined** synthetic segment
@@ -515,7 +515,7 @@ pool safely.
 It is equivalent to the annihilator form `[x1⊕x2=1]·[x2⊕x3=1]` of §7 (two coordinate choices of the same
 function; the RREF form is the canonical one).
 
-### 3.7 Algebraic closed forms for each case (2025-08 addition)
+### 3.7 Algebraic closed forms for each case
 
 Let `reduce(·)` be the reduction of a vector family to an independent basis (lowest-bit pivots). The support
 `(e, B)` of d can be expressed algebraically directly from the `(a, K)` of A and B, without enumerating 2^n:
@@ -533,7 +533,7 @@ The production decision path is the closed form: `backend/fusion/ClosedForm.py` 
 `tests/test_closed_form.py`). The old fn path (`fn()`, `is_affine_cube`, `affine_from_fn`, `shift_fn`) still
 exists and is used for `LIMBDD_FUSION_DEBUG=1` cross-checks and by research scripts.
 
-### 3.8 Gate-level identities for adjacent wrapper gates (2025-08 addition: algebraic basis of
+### 3.8 Gate-level identities for adjacent wrapper gates (algebraic basis of
 `simplify_terms`)
 
 At segment boundaries of a concatenated circuit, adjacent X/CNOT-type flip terms (LimTerm) appear and can
@@ -596,7 +596,7 @@ hash of K", pool matching is near-linear (only cases 2 and 3 are checked across 
 - **Cost model**: greedy acceptance condition `gain = t̄(dim K_A) + t̄(dim K_B) − t̄(dim F) > 0`, where
   `t̄(d) := t(n − d)` (d ≥ 0) is the extended cost (X/CNOT are not counted in T; if CNOTs were counted, the
   basis-change network size would enter).
-- **Degenerate-dimension convention (2025-08 addition, consistent with the §0 object-family definition)**:
+- **Degenerate-dimension convention (consistent with the §0 object-family definition)**:
   when `dim F = −1` (C1), the §0 convention `t̄(−1) := 0` (zero-block cost 0) applies, so the unified
   formula `gain = t̄(dim K_A) + t̄(dim K_B) − t̄(dim F)` also holds for C1, and the cancellation gain
   = `t_A + t_B`; for the zero function the convention `deg 0 := −1` is used, so the degree lower bound
@@ -605,7 +605,7 @@ hash of K", pool matching is near-linear (only cases 2 and 3 are checked across 
   `config.t_cost(0) = 0`.
 
 ### 4.4 Pairwise-completeness conjecture (decomposability of the k-to-1 rule): partial results and open
-problem (2025-08)
+problem
 
 **Conjecture** (base case k=3): if the XOR of three affine cubes `S_1, S_2, S_3` is an affine cube
 `D = d₀ + L`, then there necessarily exists a pair (i,j) satisfying C1–C4 (i.e. `S_i △ S_j` is a cube,
@@ -814,23 +814,23 @@ coordinates into two composite coordinates, the MCX control count is determined 
 9. §6: the algebraic explanations of the three defects (pivot's complete-branch assumption, the involutive
    sandwich requirement, free-variable folding).
 10. Appendices A–C: consistency of the measured numbers with the theorems of this document.
-11. (2025-08 addition) §1.3.1 single-segment T optimality lemma: the argument "m controls ⇔ support
+11. §1.3.1 single-segment T optimality lemma: the argument "m controls ⇔ support
     dimension n−m".
-12. (2025-08 addition) §3.6 RREF canonical construction: is the direction "constraint rows indexed by free
+12. §3.6 RREF canonical construction: is the direction "constraint rows indexed by free
     columns" consistent with the membership equivalence (pivot rows are 0 in the other pivot columns); the
     order-independence of the CNOT network "controls = pivots, targets = free"; polarity absorption of
     constants; canonical uniqueness (full elimination + ordering).
-13. (2025-08 addition) §3.7 closed forms: correspondence of the C2/C3/C4 `(e, B)` formulas with the input
+13. §3.7 closed forms: correspondence of the C2/C3/C4 `(e, B)` formulas with the input
     of §3.6; the cancellation semantics of C1.
-14. (2025-08 addition) §4.4 pairwise-completeness conjecture: derivation of the covering lemma, the
+14. §4.4 pairwise-completeness conjecture: derivation of the covering lemma, the
     reduction lemma, the 2-adic valuation lemma and the proved subcases; the list of unclosed cases; the
     search data of Appendix F.
-14. (2025-08 addition) §1.4 translation sensitivity: cross-piece fusion must re-decide on the shifted d'
+14. §1.4 translation sensitivity: cross-piece fusion must re-decide on the shifted d'
     (the coset-position conditions of C3/C4 are translation-sensitive; K invariance is only part of the
     necessary condition).
-15. (2025-08 addition) §2.3 mapping table: correspondence of code `four_case_kind` 1–4 with C1–C4 (3/4 are
+15. §2.3 mapping table: correspondence of code `four_case_kind` 1–4 with C1–C4 (3/4 are
     mirrors), authoritative decision = direct decision.
-16. (2025-08 addition) §3.8 gate-level merge identities: the semantics-preserving conditions of the three
+16. §3.8 gate-level merge identities: the semantics-preserving conditions of the three
     LimTerm merge rules (especially "the flip bits do not include the control bit") and the reason not to
     merge ControlTerm.
 
@@ -879,7 +879,7 @@ gates, not uncomputed).
 ("function-level fusible pair" = a branch pair with `supp(f_A ⊕ f_B)` an affine subspace, i.e. the direct
 decision of Theorem 2.)
 
-### F. Pairwise-completeness counterexample search (2025-08, script `experiments/counterexample_search.py`)
+### F. Pairwise-completeness counterexample search (script `experiments/counterexample_search.py`)
 
 Method: randomly generate triples of CompleteBranch (random SyntheticPlan: X shift + CNOT chain + random
 control subset/polarities), and filter those with `d = f_1⊕f_2⊕f_3` an affine cube and all three pairs

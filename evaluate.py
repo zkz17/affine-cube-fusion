@@ -124,13 +124,13 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     m2_post=False (the no-macro-M2 comparison runs) appends the `_noM2` suffix to the tag so its outputs
     never overwrite the default runs.
 
-    Data layout (updated 2025-08-22):
+    Data layout:
       test cases  data/test_cases/test_cases_{n} (one truth-table integer per line)
       baselines   data/exorcism_cost/exorcism_{t,cx}_cost_{n}, data/sshr_cost/sshr_{t,cx}_cost_{n}
       (aligned with test cases by line number; sshr n≥7 is temporarily empty → that comparison is skipped automatically)
     Outputs:
       data/our_cost/our_{t,cx}_cost_{n}_{start}_{stop}.txt,
-      data/our_cost/our_deg_bound_{n}_{start}_{stop}.txt (G-3 lower bound)
+      data/our_cost/deg_bound/deg_bound_{n}_{start}_{stop}.txt (G-3 lower bound, one shared file per n)
     """
     cases_path = f'data/test_cases/test_cases_{num_var}'
     with open(cases_path) as f:
@@ -151,7 +151,7 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
 
     out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
     out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
-    out_bound = open(f'data/our_cost/our_deg_bound_{tag}_{num_var}_{start}_{stop}.txt', 'w')
+    out_bound = open(f'data/our_cost/deg_bound/deg_bound_{num_var}_{start}_{stop}.txt', 'w')
 
     ours_t, ours_cx, bounds = [], [], []
     wall_ns = 0

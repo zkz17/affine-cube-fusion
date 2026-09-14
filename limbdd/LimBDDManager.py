@@ -59,7 +59,7 @@ class LimBDDManager:
         for other_limbdd in self.limbdd_list[level]:
             if not other_limbdd.root.weight: continue
             self.perform_split(other_limbdd)
-            # Established conclusion (2025-08-22, docs/architecture.md (1)): try_absorb_branch has been removed --
+            # Established conclusion (docs/architecture.md (1)): try_absorb_branch has been removed --
             # it only performs C1 cancellation, while the global fusion engine fuse_pool_global covers C1 unconditionally;
             # P4 measurements show its standalone effect is exactly zero (±8 noise level). The function body stays in this module for research.
             if not limbdd.root.weight: break

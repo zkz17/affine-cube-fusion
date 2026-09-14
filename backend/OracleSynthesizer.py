@@ -37,7 +37,7 @@ class OracleSynthesizer:
         # (a choice relation, not a min; intended to upgrade the current shift climb2 for n≥9, 12~28%
         # worse quality for n≤8)
         self.fprm_proxy = fprm_proxy
-        # Path selection (2025-08-22, exploration-phase discipline): **single-path only** -- paths is a
+        # Path selection (exploration-phase discipline): **single-path only** -- paths is a
         # single character 'A'/'C'/'F' (or a 1-tuple thereof); multi-path combinations (explicit min) are
         # disabled and untested at this stage.
         # Actual test paths = A / C / F / FP (proxy switch) / G (gl switch).
@@ -48,8 +48,7 @@ class OracleSynthesizer:
         else:
             assert paths in ('A', 'C', 'F'), f'illegal paths (only single-path A/C/F allowed at this stage): {paths}'
             self.paths = (paths,)
-        # Macro M2 interleaved post-processing switch (2025-08-22, integrated after P9; **default on**
-        # as of 2025-08-22): at the winning pool's fusion fixed point apply the strictly-decreasing macro
+        # Macro M2 interleaved post-processing switch (integrated after P9; **default on**): at the winning pool's fusion fixed point apply the strictly-decreasing macro
         # {A,B,C}→{B⊕h,(A⊕h)⊕C} (docs/macro_m2_theory.md); per-case T never regresses, zero CX-worse
         # cases over the full n≤7 measurements, 0~2.3ms/case (negligible against F's 2^n shift full
         # enumeration / FP's proxy prescreen).
@@ -172,7 +171,7 @@ class OracleSynthesizer:
         """
         Phase 5+: global fusion backend (default no-ancilla path).
 
-        Path selection (exploration-phase discipline, 2025-08-22): the production backend runs only the
+        Path selection (exploration-phase discipline): the production backend runs only the
         F path for now (paths defaults to ('F',)); paths may be any subset of {'A','C','F'}, computing
         only the selected paths and taking the best of them.
           A. BDD path: graph phase (try_neg / split_neg / reorder / splitting, absorb removed)
@@ -188,7 +187,7 @@ class OracleSynthesizer:
         relative to F; zero wrapper preferred on T ties). Exploration-phase discipline: G is an
         independent option, no implicit min(A,G). Cost: about +6s/case at n=7.
 
-        Note (2025-08-21): the C' path (ANF one-variable-apart pre-merge, 1.2/T-3) was measured and
+        Note: the C' path (ANF one-variable-apart pre-merge, 1.2/T-3) was measured and
         **turned off for now** (end-to-end gain −0.22%~−0.53% ΣT, cost +23%~36% wall, sitting in the
         decision-critical zone); `BranchFusion.anf_pool_premerged` and `tests/test_premerge.py` are
         kept and can be re-enabled at any time.
