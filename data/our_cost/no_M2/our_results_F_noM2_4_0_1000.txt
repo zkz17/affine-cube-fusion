@@ -1,0 +1,29 @@
+****** Comparison of TDD-based Method Alg. 1 (fused backend) ******
+number of input variables: 4 (1000 cases); paths=F_noM2
+avg synthesize wall: 1.89 ms/case
+===== Exorcism T =====
+lower  cost in 841(84.1%) cases
+higher cost in 0(0.0%) cases
+same   cost in 159(15.9%) cases
+cases with higher cost: []
+total cost: baseline 40007, ours 26826 (reduction 32.95%)
+===== Exorcism CX =====
+lower  cost in 750(75.0%) cases
+higher cost in 175(17.5%) cases
+same   cost in 75(7.5%) cases
+cases with higher cost: [15, 19, 30, 31, 39, 45, 47, 49, 51, 54, 55, 57, 59, 71, 75, 76, 79, 83, 85, 86]
+total cost: baseline 32074, ours 26204 (reduction 18.30%)
+===== SSHR T =====
+lower  cost in 524(52.400000000000006%) cases
+higher cost in 37(3.6999999999999997%) cases
+same   cost in 439(43.9%) cases
+cases with higher cost: [281, 293, 297, 298, 323, 332, 368, 385, 392, 399, 416, 435, 444, 448, 469, 474, 486, 533, 534, 538]
+total cost: baseline 31971, ours 26826 (reduction 16.09%)
+===== SSHR CX =====
+lower  cost in 527(52.7%) cases
+higher cost in 335(33.5%) cases
+same   cost in 138(13.8%) cases
+cases with higher cost: [7, 15, 19, 21, 25, 26, 27, 28, 29, 30, 31, 37, 38, 39, 42, 45, 46, 47, 51, 53]
+total cost: baseline 29034, ours 26204 (reduction 9.75%)
+G-3 lower bound: Σ t(deg f) = 18746 (69.88% of ours ΣT)
+****** ****** ******

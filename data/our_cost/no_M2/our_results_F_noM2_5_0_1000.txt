@@ -1,0 +1,29 @@
+****** Comparison of TDD-based Method Alg. 1 (fused backend) ******
+number of input variables: 5 (1000 cases); paths=F_noM2
+avg synthesize wall: 10.83 ms/case
+===== Exorcism T =====
+lower  cost in 998(99.8%) cases
+higher cost in 0(0.0%) cases
+same   cost in 2(0.2%) cases
+cases with higher cost: []
+total cost: baseline 109591, ours 64215 (reduction 41.40%)
+===== Exorcism CX =====
+lower  cost in 988(98.8%) cases
+higher cost in 9(0.8999999999999999%) cases
+same   cost in 3(0.3%) cases
+cases with higher cost: [134232270, 659557461, 892774133, 999026834, 1218862832, 1376269369, 2685182221, 2726360037, 2751899675]
+total cost: baseline 86937, ours 61966 (reduction 28.72%)
+===== SSHR T =====
+lower  cost in 929(92.9%) cases
+higher cost in 29(2.9000000000000004%) cases
+same   cost in 42(4.2%) cases
+cases with higher cost: [140719781, 20026820, 429038280, 248702324, 344528234, 590966779, 577549494, 1087950720, 981624057, 999026834, 1413903646, 1913851103, 2125024015, 2316028214, 2286425936, 2976250899, 2926558098, 2955235957, 2635705651, 2767335537]
+total cost: baseline 89726, ours 64215 (reduction 28.43%)
+===== SSHR CX =====
+lower  cost in 937(93.7%) cases
+higher cost in 46(4.6%) cases
+same   cost in 17(1.7000000000000002%) cases
+cases with higher cost: [339666547, 140719781, 140016881, 20026820, 429038280, 86145882, 344528234, 590966779, 577549494, 682834666, 485139939, 1082606607, 861305294, 1087950720, 981624057, 999026834, 1348367122, 1332193627, 1511493972, 1547998232]
+total cost: baseline 84483, ours 61966 (reduction 26.65%)
+G-3 lower bound: Σ t(deg f) = 26752 (41.66% of ours ΣT)
+****** ****** ******
