@@ -10,6 +10,7 @@ from backend.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool,
 from backend.fusion.GLSearch import gl_search
 from backend.fusion.FprmProxy import fprm_proxy_best
 from backend.fusion.MacroM2 import m2_interleaved
+from backend.fusion.CoverGenerators import minterm_entries, pk_entries
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 from utils.to_qiskit import to_qiskit
@@ -238,6 +239,14 @@ class OracleSynthesizer:
             best_cost = min(c[0] for c in candidates)
             _, kept, standalone, shift_c, cnots = next(c for c in candidates if c[0] == best_cost)
 
+        self._emit_pool(kept, standalone, shift_c, cnots)
+
+    def _emit_pool(self, kept, standalone, shift_c=0, cnots=()):
+        """
+        Shared emission pipeline for a fused pool (kept, standalone):
+        shift sandwich X(c) → GL wrapper CNOT(A⁻¹) → root sandwiches per r → B-4 segment
+        reordering → GL wrapper CNOT(A) → shift sandwich → simplify_terms.
+        """
         # ---- emission: shift sandwich X(c) (no-op when shift_c=0) ----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
         self.circ.add_lim_operator(shift_qubits)
@@ -270,6 +279,25 @@ class OracleSynthesizer:
 
         self.circ.add_lim_operator(shift_qubits)
         self.circ.simplify_terms()
+
+    def process_cover_route(self, tt, route):
+        """
+        Experimental starting-cover routes (branch exp/starting-cover-routes):
+
+          MT  : all-minterm pool (one dim-0 block per assignment in supp(f));
+          PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites);
+          PKM : PK cover + macro M2 interleaving.
+
+        All three skip the transformation search entirely (T = identity) and feed the
+        pool directly to the fusion engine, then emit through the shared pipeline.
+        """
+        n = tt.num_var
+        assert route in ('MT', 'PK', 'PKM'), f'illegal cover route: {route}'
+        entries = minterm_entries(tt.bitstr, n) if route == 'MT' else pk_entries(tt.bitstr, n)
+        kept, standalone = fuse_pool_global(entries, n)
+        if route == 'PKM':
+            kept, standalone = m2_interleaved(kept, standalone, n)
+        self._emit_pool(kept, standalone, 0, ())
 
     def _fprm_entries(self, tt, n):
         """

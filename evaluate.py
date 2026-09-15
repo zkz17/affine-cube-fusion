@@ -108,7 +108,7 @@ def _compare(name, cases, ours, baseline):
 
 
 def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
-                 fprm_proxy=False, paths=('F',), m2_post=True):
+                 fprm_proxy=False, paths=('F',), m2_post=True, cover=None):
     """
     Comparison of the fused backend against Exorcism / SSHR (T and CX dual scopes).
 
@@ -119,8 +119,13 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                        are allowed, multi-path combinations are disabled at this stage; FP/G are selected via flags).
     m2_post=True     : macro M2 interleaved post-processing (**enabled by default**; zero regression on the T side
                        case by case, 0 CX degradations across all n≤7 test cases).
+    cover            : experimental starting-cover route (branch exp/starting-cover-routes), one of
+                       'MT' (all-minterm pool) / 'PK' (pseudo-Kronecker cover) / 'PKM' (PK + macro M2).
+                       When set, the transformation search is skipped entirely (T = identity), the
+                       gl/proxy/paths switches are ignored, and the tag is the route name itself.
     Output files are named by path combination: `data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
-    tag = paths_tag(paths, fprm_proxy, gl_search). The default (m2_post=True) keeps the plain path tag;
+    tag = paths_tag(paths, fprm_proxy, gl_search) for the standard routes and 'MT'/'PK'/'PKM' for the
+    cover routes. The default (m2_post=True) keeps the plain path tag;
     m2_post=False (the no-macro-M2 comparison runs) appends the `_noM2` suffix to the tag so its outputs
     never overwrite the default runs.
 
@@ -147,7 +152,7 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                                           fused_backend=True, gl_search=gl_search,
                                           fprm_proxy=fprm_proxy, paths=paths,
                                           m2_post=m2_post)
-    tag = paths_tag(paths, fprm_proxy, gl_search) + ('' if m2_post else '_noM2')
+    tag = cover if cover else paths_tag(paths, fprm_proxy, gl_search) + ('' if m2_post else '_noM2')
 
     out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
     out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
@@ -160,7 +165,12 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
             print(i, flush=True)
         truth_table = TruthTable(tt, num_var)
         t0 = time.perf_counter_ns()
-        synthesizer.synthesize(truth_table)
+        if cover:
+            synthesizer.clear()
+            synthesizer.allocate_input_qubit(num_var)
+            synthesizer.process_cover_route(truth_table, cover)
+        else:
+            synthesizer.synthesize(truth_table)
         wall_ns += time.perf_counter_ns() - t0
         t, cx = count_costs(to_qiskit(synthesizer.circ))
         bound = T_COST_FN(anf_degree(truth_table.bitstr, num_var))
@@ -204,8 +214,10 @@ def main():
     proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
     paths   = sys.argv[8] if len(sys.argv) >= 9 else 'F'
     m2      = int(sys.argv[9]) if len(sys.argv) >= 10 else 1
+    cover   = sys.argv[10] if len(sys.argv) >= 11 else ''
     assert paths in ('A', 'C', 'F'), f'illegal paths (only single paths A/C/F allowed): {paths}'
     assert m2 in (0, 1), f'illegal m2 switch (0/1): {m2}'
+    assert cover in ('', 'MT', 'PK', 'PKM'), f'illegal cover route (MT/PK/PKM): {cover}'
     # m2=1 (default) writes the plain path tag; m2=0 writes the `_noM2` suffix so the
     # no-macro-M2 comparison runs never overwrite the default runs.
 
@@ -213,7 +225,8 @@ def main():
         print('Warning: fused_backend only takes effect when ancilla_num=0 (currently anc>0, the old path will be used).')
 
     evaluate_all(num_var, reorder > 0, num_anc, start, stop, gl_search=gl > 0,
-                 fprm_proxy=proxy > 0, paths=paths, m2_post=m2 > 0)
+                 fprm_proxy=proxy > 0, paths=paths, m2_post=m2 > 0,
+                 cover=cover if cover else None)
 
 
 if __name__ == "__main__":
