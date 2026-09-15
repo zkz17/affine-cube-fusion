@@ -285,17 +285,18 @@ class OracleSynthesizer:
         Experimental starting-cover routes (branch exp/starting-cover-routes):
 
           MT  : all-minterm pool (one dim-0 block per assignment in supp(f));
-          PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites);
-          PKM : PK cover + macro M2 interleaving.
+          PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites).
 
-        All three skip the transformation search entirely (T = identity) and feed the
-        pool directly to the fusion engine, then emit through the shared pipeline.
+        Both skip the transformation search entirely (T = identity) and feed the pool
+        directly to the fusion engine; macro M2 interleaving follows the regular
+        `m2_post` switch (on by default), so the no-M2 variant is selected by the
+        existing m2_post=False convention rather than by a separate route name.
         """
         n = tt.num_var
-        assert route in ('MT', 'PK', 'PKM'), f'illegal cover route: {route}'
+        assert route in ('MT', 'PK'), f'illegal cover route: {route}'
         entries = minterm_entries(tt.bitstr, n) if route == 'MT' else pk_entries(tt.bitstr, n)
         kept, standalone = fuse_pool_global(entries, n)
-        if route == 'PKM':
+        if self.m2_post:
             kept, standalone = m2_interleaved(kept, standalone, n)
         self._emit_pool(kept, standalone, 0, ())
 

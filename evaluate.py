@@ -120,9 +120,10 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     m2_post=True     : macro M2 interleaved post-processing (**enabled by default**; zero regression on the T side
                        case by case, 0 CX degradations across all n≤7 test cases).
     cover            : experimental starting-cover route (branch exp/starting-cover-routes), one of
-                       'MT' (all-minterm pool) / 'PK' (pseudo-Kronecker cover) / 'PKM' (PK + macro M2).
-                       When set, the transformation search is skipped entirely (T = identity), the
-                       gl/proxy/paths switches are ignored, and the tag is the route name itself.
+                       'MT' (all-minterm pool) / 'PK' (pseudo-Kronecker cover). When set, the
+                       transformation search is skipped entirely (T = identity) and the gl/proxy/paths
+                       switches are ignored. Macro M2 interleaving follows the regular `m2_post` switch,
+                       so the no-M2 variant uses the `_noM2` tag convention like the standard routes.
     Output files are named by path combination: `data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
     tag = paths_tag(paths, fprm_proxy, gl_search) for the standard routes and 'MT'/'PK'/'PKM' for the
     cover routes. The default (m2_post=True) keeps the plain path tag;
@@ -152,7 +153,7 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
                                           fused_backend=True, gl_search=gl_search,
                                           fprm_proxy=fprm_proxy, paths=paths,
                                           m2_post=m2_post)
-    tag = cover if cover else paths_tag(paths, fprm_proxy, gl_search) + ('' if m2_post else '_noM2')
+    tag = (cover if cover else paths_tag(paths, fprm_proxy, gl_search)) + ('' if m2_post else '_noM2')
 
     out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
     out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
@@ -217,7 +218,7 @@ def main():
     cover   = sys.argv[10] if len(sys.argv) >= 11 else ''
     assert paths in ('A', 'C', 'F'), f'illegal paths (only single paths A/C/F allowed): {paths}'
     assert m2 in (0, 1), f'illegal m2 switch (0/1): {m2}'
-    assert cover in ('', 'MT', 'PK', 'PKM'), f'illegal cover route (MT/PK/PKM): {cover}'
+    assert cover in ('', 'MT', 'PK'), f'illegal cover route (MT/PK): {cover}'
     # m2=1 (default) writes the plain path tag; m2=0 writes the `_noM2` suffix so the
     # no-macro-M2 comparison runs never overwrite the default runs.
 
