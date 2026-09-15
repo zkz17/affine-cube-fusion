@@ -69,8 +69,6 @@ data/               test cases, baselines, and per-case results (see data/README
 ## Getting started
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
 python test.py -f -b -a -c -g -e -p -q -r -s -d -x -u -w -m   # full test suite

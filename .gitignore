@@ -12,3 +12,4 @@ data/*.so
 docs/future_work.md
 docs/exorlink_unification.md
 docs/macro_m2_theory.md
+pk_minterm_route_experiment.md
