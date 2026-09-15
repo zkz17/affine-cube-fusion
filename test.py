@@ -19,6 +19,7 @@ from tests.test_cx_optim import main as cx_optim_suite
 from tests.test_gl_search import main as gl_search_suite
 from tests.test_fprm_proxy import main as fprm_proxy_suite
 from tests.test_macro_m2 import main as macro_m2_suite
+from tests.test_cover_generators import main as cover_generators_suite
 
 def main():
     argparser = argparse.ArgumentParser(prog='Test Script')
@@ -39,6 +40,7 @@ def main():
     argparser.add_argument('-u', '--gl_search_test'    , action='store_true')
     argparser.add_argument('-w', '--fprm_proxy_test'   , action='store_true')
     argparser.add_argument('-m', '--macro_m2_test'     , action='store_true')
+    argparser.add_argument('-y', '--cover_generator_test', action='store_true')
 
     args = argparser.parse_args()
 
@@ -81,6 +83,8 @@ def main():
         fprm_proxy_suite(verbose=args.verbose)
     if args.macro_m2_test:
         macro_m2_suite(verbose=args.verbose)
+    if args.cover_generator_test:
+        cover_generators_suite(verbose=args.verbose)
 
 if __name__ == '__main__':
     main()
