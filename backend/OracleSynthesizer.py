@@ -10,7 +10,8 @@ from backend.fusion.BranchFusion import fuse_pool_global, pool_t_cost, anf_pool,
 from backend.fusion.GLSearch import gl_search
 from backend.fusion.FprmProxy import fprm_proxy_best
 from backend.fusion.MacroM2 import m2_interleaved
-from backend.fusion.CoverGenerators import minterm_entries, pk_entries
+from backend.fusion.CoverGenerators import (minterm_entries, pk_entries,
+                                            pk_proxy_best, pk_shift_best)
 from circuit.Control import Control
 from circuit.MCXCircuit import MCXCircuit, order_segments_greedy
 from utils.to_qiskit import to_qiskit
@@ -285,20 +286,29 @@ class OracleSynthesizer:
         Experimental starting-cover routes (branch exp/starting-cover-routes):
 
           MT  : all-minterm pool (one dim-0 block per assignment in supp(f));
-          PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites).
+          PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites);
+          PKS : PK cover with shift search (full enumeration n≤8, climb2 n≥9);
+          PKP : PK cover with proxy-prescreened shift search (top-8 + c=0).
 
-        Both skip the transformation search entirely (T = identity) and feed the pool
-        directly to the fusion engine; macro M2 interleaving follows the regular
-        `m2_post` switch (on by default), so the no-M2 variant is selected by the
-        existing m2_post=False convention rather than by a separate route name.
+        MT/PK skip the transformation search entirely (T = identity); PKS/PKP wrap the
+        emission in the X(c) sandwich. Macro M2 interleaving follows the regular
+        `m2_post` switch, so the no-M2 variants use the `_noM2` tag convention.
         """
         n = tt.num_var
-        assert route in ('MT', 'PK'), f'illegal cover route: {route}'
-        entries = minterm_entries(tt.bitstr, n) if route == 'MT' else pk_entries(tt.bitstr, n)
-        kept, standalone = fuse_pool_global(entries, n)
+        assert route in ('MT', 'PK', 'PKS', 'PKP'), f'illegal cover route: {route}'
+        if route == 'MT':
+            kept, standalone = fuse_pool_global(minterm_entries(tt.bitstr, n), n)
+            shift_c = 0
+        elif route == 'PK':
+            kept, standalone = fuse_pool_global(pk_entries(tt.bitstr, n), n)
+            shift_c = 0
+        elif route == 'PKS':
+            kept, standalone, shift_c = pk_shift_best(tt.bitstr, n)
+        else:
+            kept, standalone, shift_c = pk_proxy_best(tt.bitstr, n)
         if self.m2_post:
             kept, standalone = m2_interleaved(kept, standalone, n)
-        self._emit_pool(kept, standalone, 0, ())
+        self._emit_pool(kept, standalone, shift_c, ())
 
     def _fprm_entries(self, tt, n):
         """

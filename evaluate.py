@@ -218,7 +218,7 @@ def main():
     cover   = sys.argv[10] if len(sys.argv) >= 11 else ''
     assert paths in ('A', 'C', 'F'), f'illegal paths (only single paths A/C/F allowed): {paths}'
     assert m2 in (0, 1), f'illegal m2 switch (0/1): {m2}'
-    assert cover in ('', 'MT', 'PK'), f'illegal cover route (MT/PK): {cover}'
+    assert cover in ('', 'MT', 'PK', 'PKS', 'PKP'), f'illegal cover route (MT/PK/PKS/PKP): {cover}'
     # m2=1 (default) writes the plain path tag; m2=0 writes the `_noM2` suffix so the
     # no-macro-M2 comparison runs never overwrite the default runs.
 
