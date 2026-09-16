@@ -16,8 +16,8 @@ def loadv(path):
 
 
 def check(tag, n, cases, samples):
-    t_file = loadv(f'data/our_cost/t_cost/our_t_cost_{tag}_{n}_0_{cases}.txt')
-    cx_file = loadv(f'data/our_cost/cx_cost/our_cx_cost_{tag}_{n}_0_{cases}.txt')
+    t_file = loadv(f'data/our_cost/{tag}/our_t_cost_{tag}_{n}_0_{cases}.txt')
+    cx_file = loadv(f'data/our_cost/{tag}/our_cx_cost_{tag}_{n}_0_{cases}.txt')
     fn_list = [int(l) for l in open(f'data/test_cases/test_cases_{n}').readlines()[:cases]]
     kwargs = dict(reorder=True, ancilla_num=0, fused_backend=True)
     if tag == 'A':
