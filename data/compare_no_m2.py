@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Compare the no-macro-M2 runs (data/our_cost/no_M2) against the default M2-enabled runs
-(data/our_cost/t_cost and data/our_cost/cx_cost) on a per-case basis, and emit the
-lower/higher/same counts, their percentages, and the total cost in the same style as
-evaluate.py's per-case comparison block.
+Compare the no-macro-M2 runs against the default M2-enabled runs on a per-case basis,
+and emit the lower/higher/same counts, their percentages, and the total cost in the
+same style as evaluate.py's per-case comparison block. Both variants live in the same
+per-path folder under data/our_cost/{tag}/; the no-M2 files carry the `_noM2` tag suffix.
 
 The no_M2 files are keyed by truth table (`tt:cost`); the default files cover a superset
 of cases (e.g. n=4 default is the exhaustive 65536-case file while no_M2 holds 1000 cases),
@@ -17,10 +17,8 @@ import re
 from glob import glob
 
 DATA = os.path.dirname(os.path.abspath(__file__))
-NO_M2 = os.path.join(DATA, 'our_cost', 'no_M2')
-DEF_T = os.path.join(DATA, 'our_cost', 't_cost')
-DEF_CX = os.path.join(DATA, 'our_cost', 'cx_cost')
-OUT = os.path.join(DATA, 'our_cost', 'no_M2_vs_default.txt')
+OUR_COST = os.path.join(DATA, 'our_cost')
+OUT = os.path.join(OUR_COST, 'no_M2_vs_default.txt')
 
 NAME_RE = re.compile(r'our_t_cost_(\w+)_noM2_(\d+)_\d+_\d+\.txt')
 
@@ -80,16 +78,16 @@ def compare(name, base_pairs, ours_map):
 
 def main():
     lines = ['****** M2 (default) vs no-M2 per-case comparison ******', '']
-    for no_t in sorted(glob(os.path.join(NO_M2, 'our_t_cost_*_noM2_*.txt'))):
+    for no_t in sorted(glob(os.path.join(OUR_COST, '*', 'our_t_cost_*_noM2_*.txt'))):
         m = NAME_RE.match(os.path.basename(no_t))
         tag, n = m.group(1), m.group(2)
         base_t = load(no_t)
-        ours_t = load_default_map(os.path.join(DEF_T, f'our_t_cost_{tag}_{n}_*.txt'))
+        ours_t = load_default_map(os.path.join(OUR_COST, tag, f'our_t_cost_{tag}_{n}_*.txt'))
 
-        no_cx_glob = glob(os.path.join(NO_M2, f'our_cx_cost_{tag}_noM2_{n}_*.txt'))
+        no_cx_glob = glob(os.path.join(OUR_COST, tag, f'our_cx_cost_{tag}_noM2_{n}_*.txt'))
         assert no_cx_glob, f'no no_M2 CX file for {tag} n={n}'
         base_cx = load(no_cx_glob[0])
-        ours_cx = load_default_map(os.path.join(DEF_CX, f'our_cx_cost_{tag}_{n}_*.txt'))
+        ours_cx = load_default_map(os.path.join(OUR_COST, tag, f'our_cx_cost_{tag}_{n}_*.txt'))
 
         lines.append(f'****** {tag} n={n} ({len(base_t)} cases) ******')
         lines += compare(f'{tag} n={n} T', base_t, ours_t)
