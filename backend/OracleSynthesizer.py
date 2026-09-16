@@ -242,11 +242,15 @@ class OracleSynthesizer:
 
         self._emit_pool(kept, standalone, shift_c, cnots)
 
-    def _emit_pool(self, kept, standalone, shift_c=0, cnots=()):
+    def _emit_pool(self, kept, standalone, shift_c=0, cnots=(), reorder=True):
         """
         Shared emission pipeline for a fused pool (kept, standalone):
         shift sandwich X(c) → GL wrapper CNOT(A⁻¹) → root sandwiches per r → B-4 segment
         reordering → GL wrapper CNOT(A) → shift sandwich → simplify_terms.
+
+        reorder=False skips the B-4 segment reordering; it is used by the raw MT0/PK0
+        baselines, whose pools may contain thousands of blocks and for which the O(m²)
+        reordering pass would dominate the runtime (T is unaffected either way).
         """
         # ---- emission: shift sandwich X(c) (no-op when shift_c=0) ----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
@@ -265,12 +269,16 @@ class OracleSynthesizer:
             self.circ.add_lim_operator(r_qubits)
             # B-4: segment order only affects CX (the segment set is unchanged, so T is unchanged);
             # evaluate through the real merge pipeline (qubit_map remapping), prefix = current unsimplified circuit.
-            for seg_circ in order_segments_greedy([cb.to_circuit(self.qubit_mgr) for cb in segs],
-                                                  self.circ if not self.circ.empty() else None):
+            seg_circs = [cb.to_circuit(self.qubit_mgr) for cb in segs]
+            if reorder:
+                seg_circs = order_segments_greedy(seg_circs, self.circ if not self.circ.empty() else None)
+            for seg_circ in seg_circs:
                 self.circ.merge(seg_circ)
             self.circ.add_lim_operator(r_qubits)
-        for seg_circ in order_segments_greedy([cb.to_circuit(self.qubit_mgr) for cb in standalone],
-                                              self.circ if not self.circ.empty() else None):
+        stand_circs = [cb.to_circuit(self.qubit_mgr) for cb in standalone]
+        if reorder:
+            stand_circs = order_segments_greedy(stand_circs, self.circ if not self.circ.empty() else None)
+        for seg_circ in stand_circs:
             self.circ.merge(seg_circ)
 
         # ---- linear sandwich when GL wins: CNOT(A) = cnots in reverse order ----
@@ -288,14 +296,22 @@ class OracleSynthesizer:
           MT  : all-minterm pool (one dim-0 block per assignment in supp(f));
           PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites);
           PKS : PK cover with shift search (full enumeration n≤8, climb2 n≥9);
-          PKP : PK cover with proxy-prescreened shift search (top-8 + c=0).
+          PKP : PK cover with proxy-prescreened shift search (top-8 + c=0);
+          MT0 : raw MT pool emitted **without** the fusion engine (baseline);
+          PK0 : raw PK pool emitted **without** the fusion engine (baseline).
 
-        MT/PK skip the transformation search entirely (T = identity); PKS/PKP wrap the
-        emission in the X(c) sandwich. Macro M2 interleaving follows the regular
-        `m2_post` switch, so the no-M2 variants use the `_noM2` tag convention.
+        MT/PK/MT0/PK0 skip the transformation search entirely (T = identity); PKS/PKP
+        wrap the emission in the X(c) sandwich. Macro M2 interleaving follows the
+        regular `m2_post` switch for the engine routes; the raw baselines MT0/PK0 skip
+        both the engine and the macro (there is no fixed point to apply it to) and are
+        emitted in generator order without the B-4 reordering pass.
         """
         n = tt.num_var
-        assert route in ('MT', 'PK', 'PKS', 'PKP'), f'illegal cover route: {route}'
+        assert route in ('MT', 'PK', 'PKS', 'PKP', 'MT0', 'PK0'), f'illegal cover route: {route}'
+        if route in ('MT0', 'PK0'):
+            entries = minterm_entries(tt.bitstr, n) if route == 'MT0' else pk_entries(tt.bitstr, n)
+            self._emit_pool([], [cb for cb, _, _ in entries], 0, (), reorder=False)
+            return
         if route == 'MT':
             kept, standalone = fuse_pool_global(minterm_entries(tt.bitstr, n), n)
             shift_c = 0

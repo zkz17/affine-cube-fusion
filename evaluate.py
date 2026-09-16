@@ -1,3 +1,4 @@
+import os
 import sys
 import time
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
@@ -10,6 +11,14 @@ from utils.to_qiskit import to_qiskit
 
 T_COST_FN = config['t_cost']
 CX_COST_FN = config['cx_cost']
+
+# All supported synthesis routes, selected by a single `path` argument.
+# A/C/F are the BDD/ANF/FPRM routes, FP is F with the proxy prescreen, G the GL search,
+# MT/PK the engine routes over the minterm / pseudo-Kronecker covers, PKS/PKP their
+# shift-search variants, and MT0/PK0 the raw covers emitted without the fusion engine.
+ROUTES = ('A', 'C', 'F', 'FP', 'G', 'MT', 'PK', 'PKS', 'PKP', 'MT0', 'PK0')
+ENGINE_ROUTES = ('A', 'C', 'F', 'FP', 'G', 'MT', 'PK', 'PKS', 'PKP')
+COVER_ROUTES = ('MT', 'PK', 'PKS', 'PKP', 'MT0', 'PK0')
 
 
 def count_costs(circ):
@@ -45,15 +54,6 @@ def count_t_cost(circ):
 def count_cx_cost(circ):
     """CX-only scope."""
     return count_costs(circ)[1]
-
-
-def paths_tag(paths, fprm_proxy, gl_search):
-    """Path label (used in output file names): gl → 'G'; single path A/C/F; fprm_proxy with F → 'FP'."""
-    if gl_search:
-        return 'G'
-    p = paths[0] if isinstance(paths, (tuple, list)) else paths
-    assert p in ('A', 'C', 'F'), f'illegal paths (only the single paths A/C/F are allowed at this stage): {paths}'
-    return 'FP' if (fprm_proxy and p == 'F') else p
 
 
 def load_aligned(cases_path, cost_path, start, stop):
@@ -107,37 +107,27 @@ def _compare(name, cases, ours, baseline):
     ]
 
 
-def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_search=False,
-                 fprm_proxy=False, paths=('F',), m2_post=True, cover=None):
+def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=True):
     """
     Comparison of the fused backend against Exorcism / SSHR (T and CX dual scopes).
 
-    gl_search=True   : enable the G-2.2 deterministic GL search (time for quality, about +6s/case at n=7).
-    fprm_proxy=True  : Plan A — the F path is **replaced** by the fusion-free proxy-prescreened version
-                       (a choice relationship, not a min; for n≥9 the intent is to upgrade to shift climb2).
-    paths            : single-path choice (exploration-phase discipline, default 'F'; only 'A'/'C'/'F'
-                       are allowed, multi-path combinations are disabled at this stage; FP/G are selected via flags).
-    m2_post=True     : macro M2 interleaved post-processing (**enabled by default**; zero regression on the T side
-                       case by case, 0 CX degradations across all n≤7 test cases).
-    cover            : experimental starting-cover route (branch exp/starting-cover-routes), one of
-                       'MT' (all-minterm pool) / 'PK' (pseudo-Kronecker cover). When set, the
-                       transformation search is skipped entirely (T = identity) and the gl/proxy/paths
-                       switches are ignored. Macro M2 interleaving follows the regular `m2_post` switch,
-                       so the no-M2 variant uses the `_noM2` tag convention like the standard routes.
-    Output files are named by path combination: `data/our_cost/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt`,
-    tag = paths_tag(paths, fprm_proxy, gl_search) for the standard routes and 'MT'/'PK'/'PKM' for the
-    cover routes. The default (m2_post=True) keeps the plain path tag;
-    m2_post=False (the no-macro-M2 comparison runs) appends the `_noM2` suffix to the tag so its outputs
-    never overwrite the default runs.
+    Usage: evaluate.py <n> <start> <stop> <path> [m2] [reorder]
 
-    Data layout:
-      test cases  data/test_cases/test_cases_{n} (one truth-table integer per line)
-      baselines   data/exorcism_cost/exorcism_{t,cx}_cost_{n}, data/sshr_cost/sshr_{t,cx}_cost_{n}
-      (aligned with test cases by line number; sshr n≥7 is temporarily empty → that comparison is skipped automatically)
-    Outputs:
-      data/our_cost/our_{t,cx}_cost_{n}_{start}_{stop}.txt,
-      data/our_cost/deg_bound/deg_bound_{n}_{start}_{stop}.txt (G-3 lower bound, one shared file per n)
+    path    : the synthesis route, one of A / C / F / FP / G / MT / PK / PKS / PKP / MT0 / PK0.
+              A = BDD decomposition, C = plain ANF, F = FPRM (shift search), FP = F with the
+              proxy prescreen, G = deterministic GL(n,2) search, MT/PK = minterm /
+              pseudo-Kronecker covers fused by the engine, PKS/PKP = their shift-search
+              variants, MT0/PK0 = the raw covers emitted without the fusion engine (baselines).
+    m2      : macro M2 interleaved post-processing (1 = on, default; 0 = off, tagged `_noM2`).
+              Ignored for MT0/PK0, which skip the engine entirely.
+    reorder : variable reordering for the BDD route A only (1 = on, default).
+
+    Outputs are written to `data/our_cost/{tag}/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt` and
+    `data/our_cost/{tag}/our_results_{tag}_{n}_{a}_{b}.txt`. The G-3 degree lower bound is
+    reported inside the results file but no longer written as a separate file (it depends
+    only on the test set, not on the route).
     """
+    assert path in ROUTES, f'illegal route: {path}'
     cases_path = f'data/test_cases/test_cases_{num_var}'
     with open(cases_path) as f:
         n_total = len(f.readlines())
@@ -149,15 +139,22 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     _, sshr_t = load_aligned(cases_path, f'data/sshr_cost/sshr_t_cost_{num_var}', start, stop)
     _, sshr_cx = load_aligned(cases_path, f'data/sshr_cost/sshr_cx_cost_{num_var}', start, stop)
 
-    synthesizer = OracleSynthesizer(reorder=reorder, ancilla_num=num_anc,
-                                          fused_backend=True, gl_search=gl_search,
-                                          fprm_proxy=fprm_proxy, paths=paths,
-                                          m2_post=m2_post)
-    tag = (cover if cover else paths_tag(paths, fprm_proxy, gl_search)) + ('' if m2_post else '_noM2')
+    tag = path if path in ('MT0', 'PK0') else path + ('' if m2_post else '_noM2')
+    outdir = f'data/our_cost/{tag}'
+    os.makedirs(outdir, exist_ok=True)
+    out_t = open(f'{outdir}/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
+    out_cx = open(f'{outdir}/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
 
-    out_t = open(f'data/our_cost/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
-    out_cx = open(f'data/our_cost/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
-    out_bound = open(f'data/our_cost/deg_bound/deg_bound_{num_var}_{start}_{stop}.txt', 'w')
+    if path == 'G':
+        synthesizer = OracleSynthesizer(fused_backend=True, gl_search=True, m2_post=m2_post)
+    else:
+        kwargs = dict(reorder=reorder, fused_backend=True, m2_post=m2_post)
+        if path in ('A', 'C', 'F', 'FP'):
+            kwargs['paths'] = ('A',) if path == 'A' else ('C',) if path == 'C' else ('F',)
+            if path == 'FP':
+                kwargs['fprm_proxy'] = True
+        synthesizer = OracleSynthesizer(**kwargs)
+    cover = path if path in COVER_ROUTES else None
 
     ours_t, ours_cx, bounds = [], [], []
     wall_ns = 0
@@ -178,18 +175,16 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
 
         out_t.write(f'{tt}:{t}\n')
         out_cx.write(f'{tt}:{cx}\n')
-        out_bound.write(f'{tt}:{bound}\n')
         ours_t.append(t)
         ours_cx.append(cx)
         bounds.append(bound)
 
     out_t.close()
     out_cx.close()
-    out_bound.close()
 
     avg_wall_ms = wall_ns / max(total, 1) / 1e6
     report = [f"****** Comparison of TDD-based Method Alg. 1 (fused backend) ******",
-              f"number of input variables: {num_var} ({total} cases); paths={tag}",
+              f"number of input variables: {num_var} ({total} cases); path={tag}",
               f"avg synthesize wall: {avg_wall_ms:.2f} ms/case"]
     report += _compare("Exorcism T", cases, ours_t, exor_t)
     report += _compare("Exorcism CX", cases, ours_cx, exor_cx)
@@ -200,34 +195,22 @@ def evaluate_all(num_var=3, reorder=False, num_anc=0, start=0, stop=None, gl_sea
     report.append("****** ****** ******")
 
     text = '\n'.join(report) + '\n'
-    with open(f'data/our_cost/our_results_{tag}_{num_var}_{start}_{stop}.txt', 'w') as f:
+    with open(f'{outdir}/our_results_{tag}_{num_var}_{start}_{stop}.txt', 'w') as f:
         f.write(text)
     print(text, end='')
 
 
 def main():
     num_var = int(sys.argv[1]) if len(sys.argv) >= 2 else 3
-    reorder = int(sys.argv[2]) if len(sys.argv) >= 3 else 1
-    num_anc = int(sys.argv[3]) if len(sys.argv) >= 4 else 0
-    start   = int(sys.argv[4]) if len(sys.argv) >= 5 else 0
-    stop    = int(sys.argv[5]) if len(sys.argv) >= 6 else None
-    gl      = int(sys.argv[6]) if len(sys.argv) >= 7 else 0
-    proxy   = int(sys.argv[7]) if len(sys.argv) >= 8 else 0
-    paths   = sys.argv[8] if len(sys.argv) >= 9 else 'F'
-    m2      = int(sys.argv[9]) if len(sys.argv) >= 10 else 1
-    cover   = sys.argv[10] if len(sys.argv) >= 11 else ''
-    assert paths in ('A', 'C', 'F'), f'illegal paths (only single paths A/C/F allowed): {paths}'
+    start   = int(sys.argv[2]) if len(sys.argv) >= 3 else 0
+    stop    = int(sys.argv[3]) if len(sys.argv) >= 4 else None
+    path    = sys.argv[4] if len(sys.argv) >= 5 else 'F'
+    m2      = int(sys.argv[5]) if len(sys.argv) >= 6 else 1
+    reorder = int(sys.argv[6]) if len(sys.argv) >= 7 else 1
+    assert path in ROUTES, f'illegal route: {path}'
     assert m2 in (0, 1), f'illegal m2 switch (0/1): {m2}'
-    assert cover in ('', 'MT', 'PK', 'PKS', 'PKP'), f'illegal cover route (MT/PK/PKS/PKP): {cover}'
-    # m2=1 (default) writes the plain path tag; m2=0 writes the `_noM2` suffix so the
-    # no-macro-M2 comparison runs never overwrite the default runs.
 
-    if num_anc != 0:
-        print('Warning: fused_backend only takes effect when ancilla_num=0 (currently anc>0, the old path will be used).')
-
-    evaluate_all(num_var, reorder > 0, num_anc, start, stop, gl_search=gl > 0,
-                 fprm_proxy=proxy > 0, paths=paths, m2_post=m2 > 0,
-                 cover=cover if cover else None)
+    evaluate_all(num_var, start, stop, path, m2_post=m2 > 0, reorder=reorder > 0)
 
 
 if __name__ == "__main__":
