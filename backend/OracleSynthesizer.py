@@ -250,7 +250,8 @@ class OracleSynthesizer:
 
         reorder=False skips the B-4 segment reordering; it is used by the raw MT0/PK0
         baselines, whose pools may contain thousands of blocks and for which the O(m²)
-        reordering pass would dominate the runtime (T is unaffected either way).
+        reordering pass would dominate the runtime (T is unaffected either way). The raw
+        ANF baseline C0 follows the same emission policy for a consistent comparison.
         """
         # ---- emission: shift sandwich X(c) (no-op when shift_c=0) ----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
@@ -297,19 +298,21 @@ class OracleSynthesizer:
           PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites);
           PKS : PK cover with shift search (full enumeration n≤8, climb2 n≥9);
           PKP : PK cover with proxy-prescreened shift search (top-8 + c=0);
+          C0  : raw ANF pool emitted **without** the fusion engine (baseline);
           MT0 : raw MT pool emitted **without** the fusion engine (baseline);
           PK0 : raw PK pool emitted **without** the fusion engine (baseline).
 
-        MT/PK/MT0/PK0 skip the transformation search entirely (T = identity); PKS/PKP
+        MT/PK/C0/MT0/PK0 skip the transformation search entirely (T = identity); PKS/PKP
         wrap the emission in the X(c) sandwich. Macro M2 interleaving follows the
-        regular `m2_post` switch for the engine routes; the raw baselines MT0/PK0 skip
+        regular `m2_post` switch for the engine routes; the raw baselines C0/MT0/PK0 skip
         both the engine and the macro (there is no fixed point to apply it to) and are
         emitted in generator order without the B-4 reordering pass.
         """
         n = tt.num_var
-        assert route in ('MT', 'PK', 'PKS', 'PKP', 'MT0', 'PK0'), f'illegal cover route: {route}'
-        if route in ('MT0', 'PK0'):
-            entries = minterm_entries(tt.bitstr, n) if route == 'MT0' else pk_entries(tt.bitstr, n)
+        assert route in ('MT', 'PK', 'PKS', 'PKP', 'C0', 'MT0', 'PK0'), f'illegal cover route: {route}'
+        raw_generators = {'C0': anf_pool, 'MT0': minterm_entries, 'PK0': pk_entries}
+        if route in raw_generators:
+            entries = raw_generators[route](tt.bitstr, n)
             self._emit_pool([], [cb for cb, _, _ in entries], 0, (), reorder=False)
             return
         if route == 'MT':

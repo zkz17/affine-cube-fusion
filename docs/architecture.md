@@ -18,7 +18,7 @@
 
 ```
 backend/                     synthesizer and fusion engine
-  OracleSynthesizer.py       OracleSynthesizer (formerly LimBDDOracleSynthesizer): entry point of the five paths
+  OracleSynthesizer.py       classic synthesize entry and process_cover_route entry
   CompleteBranch.py          CompleteBranch / SyntheticPlan / plan_from_affine / plan_min_cx /
                              t_cost / rref / reduce_basis / in_span / is_affine_cube / affine_from_fn
                              (CompleteBranch == the paper's "Affine Block")
@@ -29,6 +29,7 @@ backend/                     synthesizer and fusion engine
     GLSearch.py              option G: gl_search / fprm_best / apply_linear / climb_best
     FprmProxy.py             option FP: proxy_scores / fprm_proxy_best
     MacroM2.py               macro M2 post-processing: m2_best_move / m2_interleaved / h_candidates
+    CoverGenerators.py       minterm / greedy PK covers, PK shift search and proxy prescreen
 limbdd/                      BDD core and extraction
   Node.py / Lim.py / LimBDD.py / LimBDDManager.py
   patterns/                  SplitPattern / SplitLv2Pattern / SplitInterceptorPattern (split patterns)
@@ -49,13 +50,15 @@ evaluate.py / test.py        evaluation entry / test entry
 Key points:
 
 - The production path is the **fused backend** (`OracleSynthesizer.fused_backend=True` with
-  `ancilla_num=0`); the legacy ancilla path (`ancilla_num>0`) is retained but deprecated and untested.
+  `ancilla_num=0`). Evaluation explicitly fixes zero ancillas and exposes no ancilla argument.
+  The class retains a legacy `ancilla_num=1` default for older callers; direct fused-backend
+  callers must pass zero explicitly. Ancilla-assisted synthesis is outside the current experiments.
 - `limbdd/patterns/` only serves the split patterns of the BDD graph phase; the fusion engine does
   not depend on BDD and merely consumes pool entries `(CompleteBranch, root_mask, key)`.
 
 ---
 
-## 2. Synthesis pipeline and the five paths (A / C / F / FP / G)
+## 2. Synthesis pipelines and starting-cover routes
 
 ### 2.1 Overall flow
 
@@ -79,15 +82,15 @@ TruthTable tt
   combinations (an explicit min) are disabled at this stage. FP and G are selected by switches and
   are never combined with other paths through an implicit min.
 
-### 2.2 The five paths
+### 2.2 The five classic paths
 
 | Label | Entry | Initial pool / search | Emission sandwich |
 |---|---|---|---|
 | **A** (BDD) | `paths=('A',)` | `construct` (variable order + `try_neg`/`split_neg`/`reorder`/sifting) -> `_collect_pieces_fused` (split patterns; absorb removed) -> `extract_complete_branches` | per-piece root-mask `X(r)` sandwich |
 | **C** (ANF) | `paths=('C',)` | `anf_pool`: fast Möbius transform, every monomial `x^S` becomes one affine block (`c=0` semantics) | no shift sandwich |
-| **F** (FPRM, production default) | `paths=('F',)` | `_fprm_entries`: search the optimal shift `c` over the translation subgroup; `n≤8` full `2^n` enumeration, `n≥9` two-start `climb2` (starts `0` and `2^n−1`) | `X(c)` sandwich (T-free) |
+| **F** (FPRM, production default) | `paths=('F',)` | `_fprm_entries`: select a shift `c` by the pairwise-fused pool cost; `n≤8` full `2^n` enumeration, `n≥9` two-start `climb2` (starts `0` and `2^n−1`) | `X(c)` sandwich (T-free) |
 | **FP** (proxy) | `paths=('F',)` with `fprm_proxy=True` | `fprm_proxy_best`: enumerate all `2^n` shifts with Möbius only, proxy score `S1 = Σt(n−|S|) − P`, take top-8 by ascending `(S1,c)` and always include `c=0`, then full fusion on ≤9 candidates | `X(c)` sandwich |
-| **G** (GL) | `gl_search=True` (ignores `paths`) | `gl_search`: first compute the FPRM-optimal `cF`; start set = `{identity on f, identity on f∘τ_cF} ∪ {all single CNOTs on f∘τ_cF}`; steepest ascent in the CNOT neighborhood, `max_steps=3`; candidates include `cF` itself (zero wrapper) | `X(c) · CNOT(A⁻¹) · [segments] · CNOT(A) · X(c)` (CNOTs counted in CX) |
+| **G** (GL) | `gl_search=True` (ignores `paths`) | `gl_search`: first compute the F-selected `cF`; start set = `{identity on f, identity on f∘τ_cF} ∪ {all single CNOTs on f∘τ_cF}`; steepest ascent in the CNOT neighborhood, `max_steps=3`; candidates include `cF` itself (zero wrapper) | `X(c) · CNOT(A⁻¹) · [segments] · CNOT(A) · X(c)` (CNOTs counted in CX) |
 
 Path-selection semantics: for non-G paths the paths listed in `paths` are computed in the given
 order, the one with the lowest `pool_t_cost` wins, ties keep the earlier one. All paths feed the
@@ -96,6 +99,15 @@ same `fuse_pool_global` engine.
 For G, the zero-regression relation `G ≤ F` is **structural before macro-M2 post-processing**
 (candidates always include `cF`); with `m2_post` on (the default) it becomes empirical — no
 violation was observed in the n≤7 measurements, and it is not a design constraint.
+The same qualification applies to shift-search candidate inclusion relative to C: M2 runs
+only on the winning pool, so pre-M2 dominance does not prove post-M2 dominance.
+
+The evaluator also calls `process_cover_route` after clearing the synthesizer and allocating
+all input qubits. **MT** and **PK** feed minterm and greedy pseudo-Kronecker-style covers into
+the same fusion engine. **PKS** searches shifted PK covers (all shifts for n≤8, two-start
+climb for n≥9); **PKP** prescreens shifts and fuses the top-8 plus c=0. These four routes
+honor `m2_post`. **C0 / MT0 / PK0** emit raw ANF / minterm / PK covers in generator order,
+with no fusion, M2, or segment reordering. This gives three corresponding raw-cover baselines.
 
 ### 2.3 Emission pipeline (tail of `process_fused_global`)
 
@@ -114,8 +126,11 @@ violation was observed in the n≤7 measurements, and it is not a design constra
 
 Each segment is emitted by `CompleteBranch.to_circuit` as an **involutive sandwich**:
 `X(x_trans) → CNOT network → MCX → CNOT network (inverse) → X(x_trans)`. Synthetic segments are
-emitted with `plan_min_cx` (CX-optimal basis; T unchanged), while the stored `SyntheticPlan` keeps
-the RREF canonical form (needed for idempotence/hashing in the fusion pool).
+emitted with `plan_min_cx`, while the stored `SyntheticPlan` keeps the RREF canonical form
+(needed for idempotence/hashing in the fusion pool). The current basis-candidate pass reduces
+all row-equivalent candidates to the same RREF under the same column order. It therefore
+provides no additional CX reduction and does not establish CX optimality. Segment reordering
+and gate simplification remain the effective CX optimizations.
 
 **B-4 segment reordering** (`order_segments_greedy`): nearest-neighbor greedy using the boundary
 cancellation `boundary_cx_savings` as edge weight (all starts tried), candidates include the
@@ -127,9 +142,10 @@ the CX-minimal one is taken. It **affects CX only and never T** (the segment set
 ## 3. Fusion engine highlights
 
 - **Representation**: each segment is the indicator function of an affine cube `base + span(basis)`;
-  `CompleteBranch.affine()` derives it symbolically in O(n²) (no 2^n enumeration). A cross-slice
+  `CompleteBranch.affine()` derives it symbolically using O(n²) operations on n-bit masks
+  (no 2^n enumeration). A cross-slice
   shift is exactly `base ^= root_mask` (`canonical_affine`).
-- **Closed-form decision C1–C4** (`ClosedForm.fuse_closed`, O(n²) bit operations; this is the
+- **Closed-form decision C1–C4** (`ClosedForm.fuse_closed`, O(n²) operations on n-bit masks; this is the
   production decision path):
   - `K_A == K_B`: `d ∈ K` -> C1 cancellation (always accepted); otherwise C2 fusion;
   - `K_A ⊂ K_B` or `K_B ⊂ K_A` with codimension 1 and the same large coset -> C3 (set difference,
@@ -155,9 +171,10 @@ the CX-minimal one is taken. It **affects CX only and never T** (the segment set
 - **gl_search (G)**: deterministic GL(n,2) local search, a small-n enhancement option; validated for
   n≤7, about **1.05 s/case at n=6**. Most of that time is re-running `fuse_pool_global` for every
   coordinate change (~94%).
-- **fprm_proxy (option FP)**: proxy prescreen replacing F. Proxy scores `S0 = Σt(n−|S|)` (the exact
-  pre-fusion ΣT), `P` = number of one-variable-apart monomial pairs, `S1 = S0 − P`; top-8 candidates
-  get full fusion. Always including `c=0` implies the result is ≤ the C path.
+- **fprm_proxy (option FP)**: proxy prescreen replacing F. The saved experiments use the legacy
+  heuristic `S0 = Σt(n−|S|)`, with `P` = number of one-variable-apart monomial pairs and
+  `S1 = S0 − P`; this is not the raw ANF cost, which is `Σt(|S|)`. Top-8 candidates get full
+  fusion. Always including `c=0` implies the result is ≤ the C path before M2.
   Measured over n=3..10: it retains **85–98%** of F's Exorcism T reduction; it is **8–13× faster at
   n=7/8** but only about **2× faster at n=9/10** (the proxy pass itself costs O(n·4^n) because every
   one of the `2^n` shifts needs a Möbius transform, whereas F's `climb2` evaluates only tens of full
@@ -166,12 +183,15 @@ the CX-minimal one is taken. It **affects CX only and never T** (the segment set
   - schedule: `fuse_pool_global` to a fixed point -> enumerate the best macro M2 -> re-fuse, at most
     `max_rounds=30` iterations;
   - move: for a segment pair `(A,B)` and a candidate `h` (taken from the single-row divergent family
-    of the pair's constraint rows), first apply the two-sided rewrite `{A,B} -> {A⊕h, B⊕h}`, then fuse
+    of the pair's constraint rows: all shared rows plus one differing equation, with each polarity
+    tried separately for an opposite row), first apply `{A,B} -> {A⊕h, B⊕h}`, then fuse
     `A⊕h` with a third segment `C`; the result replaces `{A,B,C}` by `{B⊕h, (A⊕h)⊕C}`;
   - acceptance uses the **true total gain** `imm + g_fuse > 0`, with
-    `imm = t(A)+t(B)−t(A⊕h)−t(B⊕h)` (necessarily ≤ 0 at a fixed point) and
+    `imm = t(A)+t(B)−t(A⊕h)−t(B⊕h)` and
     `g_fuse = t(A⊕h)+t(C)−t((A⊕h)⊕C)`; the pair rewrite itself may be T-neutral or slightly
-    worsening — only the total is required to be positive;
+    worsening — only the total is required to be positive. The implementation requires
+    nonzero rewrite and final fusion products; it implements this three-block subset of the
+    broader macro definition, not a separate immediate two-block rewrite pass;
   - C prescreen: a necessary condition for `gain(A′,C) > 0` is a `dim(K)` difference ≤ 1, so `C` is
     scanned per dim bucket;
   - the XOR-invariant assertion runs only under `LIMBDD_FUSION_DEBUG=1`; every step strictly
@@ -198,17 +218,19 @@ data/test_cases/test_cases_{n}                    # one truth-table integer per 
 data/exorcism_cost/exorcism_{t,cx}_cost_{n}       # Exorcism baseline (aligned by line number)
 data/sshr_cost/sshr_{t,cx}_cost_{n}               # SSHR baseline (n>=7 empty -> skipped automatically)
 data/our_cost/
-  t_cost/    our_t_cost_{tag}_{n}_{start}_{stop}.txt
-  cx_cost/   our_cx_cost_{tag}_{n}_{start}_{stop}.txt
-  deg_bound/ our_deg_bound_{tag}_{n}_{start}_{stop}.txt   # G-3 lower bound t(deg f)
-  our_results_{tag}_{n}_{start}_{stop}.txt                # summary report
+  {path}/    our_t_cost_{tag}_{n}_{start}_{stop}.txt
+             our_cx_cost_{tag}_{n}_{start}_{stop}.txt
+             our_results_{tag}_{n}_{start}_{stop}.txt
+  deg_bound/ # historical lower-bound files; new runs report the bound in the summary only
+  no_M2_vs_default.txt
 ```
 
-- `tag ∈ {A, C, F, FP, G}` as produced by `paths_tag`: `gl_search` -> `G`; `fprm_proxy` with F -> `FP`;
-  otherwise the single path character.
-- Measurement campaign sizes: n=3 all 256 cases, n=4 all 65536, n=5–7 10000 each, n=8–10 1000 each;
-  A/C/F/FP for all n, G only for n=3–6; the fused backend includes `m2_post` (default). An n=11
-  dataset (test cases, Exorcism baselines and per-path results for 1000 cases) has since been added.
+- `path` is one of `A C F FP G MT PK PKS PKP C0 MT0 PK0`. `tag` is the route name, with
+  `_noM2` appended when M2 is disabled; both variants share the base route directory.
+  Raw C0/MT0/PK0 always use their plain tag and ignore the M2 switch.
+- Classic campaign: n=3 all 256 cases, n=4 all 65536, n=5–7 10000 each, n=8–11 1000 each;
+  G stops at n=7. Cover routes use the first 1000 cases for each n=5..11. Saved no-M2
+  comparisons cover A/C/F/FP at n=4..11, 1000 cases each. See `data/README.md` for exact coverage.
 
 ---
 
@@ -216,19 +238,20 @@ data/our_cost/
 
 1. **Routine changes are tested for n≤7 only**; n≥8 runs are reserved for the final aggregation round
    (time budget).
-2. **Single-path discipline**: only the five independent paths A / C / F / FP / G are measured, and no
-   min is taken across paths; FP and G are switch options and are never implicitly combined with the
-   default F.
+2. **Single-path discipline**: each evaluation measures one of the twelve routes, with no
+   min taken across routes; FP and G are never implicitly combined with the default F.
 3. **Determinism**: full enumeration / deterministic start sets (`climb2`, the GL start set, the
    `(S1,c)` proxy ordering) / deterministic tie-breaking; no random sampling (the old rand64 sampler
    was replaced by `climb2`).
 4. **XOR invariant**: under `LIMBDD_FUSION_DEBUG=1` the fusion engine and macro M2 assert round by
    round that the pool XOR equals the target function (guaranteed by `h⊕h=0` for M2 rewrites).
-5. **Time measurement**: `time.perf_counter_ns()` around `synthesize(tt)`, accumulated per case and
-   averaged (`evaluate.py` prints `avg synthesize wall`); recorded on the same machine, commit and
-   process count.
-6. **Emission verification**: end-to-end `circ.verify(tt)` / `compute_tt() == tt.bitstr` per case
-   (every path suite in `tests/test_*` includes the emission-level `compute_tt` check).
+5. **Time measurement**: `time.perf_counter_ns()` around synthesis (including reset/allocation
+   for cover routes), accumulated per case and averaged as `avg synthesize wall`. Verification,
+   Qiskit conversion, and file I/O are excluded. Historical timings come from separate runs;
+   controlled timing comparisons require the same environment and execution conditions.
+6. **Emission verification**: the evaluator rejects a circuit unless `circ.verify(tt)` succeeds.
+   `test.py -y -z` covers raw ANF semantics/costs, all evaluation routes with both M2 settings,
+   directory conventions, and summary consumers on multiple nonzero input intervals.
 
 ---
 
@@ -253,7 +276,11 @@ data/our_cost/
   reduction turns negative (−3.1% → −9.2%) and C's is only +4~9%. Both are kept as path controls and
   for coarse-pool research, not as production defaults.
 
-### 6.2 Final data summary (`experiments/data_summary.py`)
+### 6.2 Historical classic-route summary (n=3..10)
+
+The following numbers describe the earlier classic-route campaign. They do not include
+the starting-cover comparison. `experiments/data_summary.py` reads current per-route files;
+it prints the chosen sample interval because totals from different intervals are not comparable.
 
 **F path vs Exorcism T (n=3..10)**: `+30.9% / +38.4% / +41.4% / +38.4% / +32.2% / +27.3% / +21.7% /
 +20.8%`, **with zero higher cases**.
@@ -278,9 +305,10 @@ that F at n=9 is faster than at n=8 is explained by the FPRM budget switch in §
   at n=6), so it remains a small-n quality demonstration/enhancement option.
 - **FP**: retains 85–98% of F's T reduction and is 8–13× faster at n=7/8 (about 2× at n=9/10); it is
   the intended substitute for F in time-sensitive runs.
-- **M2**: on by default (per-case T never regresses, zero CX-worse cases over the full n≤7
-  measurements, 0~2.3 ms/case); its marginal effect is ≈0 on F/G and −0.4~−6.4% on A/C/FP, but it is
-  cheap and regression-free, so it is part of the default fused backend.
+- **M2**: on by default; accepted moves strictly decrease T. CX is not part of the macro
+  acceptance condition and can increase (the saved A comparisons at n=10/11 include such cases).
+  Use `data/our_cost/no_M2_vs_default.txt` for the saved A/C/F/FP comparisons; no saved G
+  no-M2 campaign is included in that report.
 
 ### 6.4 Input-qubit allocation fix (fused backend)
 

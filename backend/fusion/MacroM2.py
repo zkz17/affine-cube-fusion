@@ -2,11 +2,10 @@
 """
 Macro M2 production implementation (P9-finalized form).
 
-Theory: docs/macro_m2_theory.md §2-3. For a δ=2 pair (A,B) and a candidate h (the classical
+See docs/architecture.md §3. For a δ=2 pair (A,B) and a candidate h (the classical
 exorlink divergent-literal family, P6a mechanism), first apply the two-sided rewrite
-{A,B} → {A⊕h, B⊕h} (pair move imm, at a fixed point necessarily ≤ 0, otherwise the δ=2
-immediate move would already have been taken), then pick a third segment C to fuse with A′
-(g_fuse > 0 and total gain imm + g_fuse > 0), applying:
+{A,B} → {A⊕h, B⊕h} (pair gain imm), then pick a third segment C to fuse with A′
+(total gain imm + g_fuse > 0), applying:
 
     {A, B, C} → { B⊕h, (A⊕h)⊕C }
 
@@ -129,7 +128,7 @@ def m2_best_move(pool, n, prescreen=True):
     Best macro M2 on a fixed-point pool. Returns (total, idxA, idxB, k, rA, rB, rc) or None.
 
     total = imm + g_fuse > 0 is the true total gain:
-      imm     = t(A)+t(B) − t(A⊕h) − t(B⊕h)   (pair move; ≤ 0 at a fixed point);
+      imm     = t(A)+t(B) − t(A⊕h) − t(B⊕h)   (pair-rewrite gain);
       g_fuse  = t(A⊕h)+t(C) − t((A⊕h)⊕C)     (A′+C fusion gain).
     With prescreen=True, C is only scanned in the buckets whose dim(K) differs from rA.dim by ≤1
     (theory generalization #6); differential correctness is verified against a full scan by

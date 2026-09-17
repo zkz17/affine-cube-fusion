@@ -175,7 +175,7 @@ def plan_from_affine(base, basis, n):
     constants are absorbed into the MCX polarity.
 
     This function keeps the **canonical form** (unique, hashable) for idempotent re-entry into the
-    fusion pool; CX minimization at emission time is done by plan_min_cx (T unchanged, only a basis change).
+    fusion pool. Emission also calls plan_min_cx, whose current basis candidates reduce to this same plan.
     """
     pivots = rref([(b, 0) for b in basis], n)
     pivot_cols = {col for _, _, col in pivots}
@@ -211,13 +211,11 @@ def _plan_for_basis(base, basis, n):
 
 def plan_min_cx(base, basis, n):
     """
-    B-4: CX-optimal emission plan.
+    Experimental basis-candidate pass, currently equivalent to the canonical emission plan.
 
-    The same affine cube has several basis representations; over the deterministic candidate set
-    "canonical basis + all pairwise vector sums" pick the construction with the smallest CNOT count
-    (ties keep the canonical basis first, hence deterministic). The control count is unchanged, so
-    T is unchanged and only the CNOT network shrinks. The canonical plan (plan_from_affine) is still
-    used for the fusion pool's idempotence/hashing.
+    Pairwise vector sums preserve the direction space. _plan_for_basis reduces every candidate
+    to RREF with the same column order, so all candidates give the same CNOT network. This pass
+    provides no additional CX reduction and is not a global optimality guarantee. T is unchanged.
     """
     candidates = [tuple(basis)]
     k = len(basis)
@@ -397,7 +395,7 @@ class CompleteBranch:
         """
         circ = MCXCircuit(qubit_mgr, target)
         if self.synthetic is not None:
-            # B-4: emission uses the CX-optimal basis (the stored plan keeps the RREF canonical form; control count unchanged, so T unchanged)
+            # Current basis candidates all reduce to the same canonical plan; T is unchanged.
             plan = plan_min_cx(*self.affine(), self.n)
             x_qubits = [qubit_mgr.get_input_qubit(v) for v in _bits(plan.x_trans)]
             circ.add_lim_operator(x_qubits)

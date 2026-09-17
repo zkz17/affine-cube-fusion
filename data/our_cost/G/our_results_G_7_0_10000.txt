@@ -1,5 +1,5 @@
 ****** Comparison of TDD-based Method Alg. 1 (fused backend) ******
-number of input variables: 7 (1000 cases); paths=G
+number of input variables: 7 (10000 cases); paths=G
 avg synthesize wall: 5786.01 ms/case
 ===== Exorcism T =====
 lower  cost in 10000(100.0%) cases

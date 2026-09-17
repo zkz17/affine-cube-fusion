@@ -20,6 +20,7 @@ from tests.test_gl_search import main as gl_search_suite
 from tests.test_fprm_proxy import main as fprm_proxy_suite
 from tests.test_macro_m2 import main as macro_m2_suite
 from tests.test_cover_generators import main as cover_generators_suite
+from tests.test_evaluate import main as evaluation_suite
 
 def main():
     argparser = argparse.ArgumentParser(prog='Test Script')
@@ -41,6 +42,7 @@ def main():
     argparser.add_argument('-w', '--fprm_proxy_test'   , action='store_true')
     argparser.add_argument('-m', '--macro_m2_test'     , action='store_true')
     argparser.add_argument('-y', '--cover_generator_test', action='store_true')
+    argparser.add_argument('-z', '--evaluation_test', action='store_true')
 
     args = argparser.parse_args()
 
@@ -85,6 +87,8 @@ def main():
         macro_m2_suite(verbose=args.verbose)
     if args.cover_generator_test:
         cover_generators_suite(verbose=args.verbose)
+    if args.evaluation_test:
+        evaluation_suite(verbose=args.verbose)
 
 if __name__ == '__main__':
     main()

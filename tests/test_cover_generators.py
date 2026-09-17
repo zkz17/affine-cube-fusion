@@ -17,6 +17,10 @@ from utils.TruthTable import TruthTable
 from backend.fusion.BranchFusion import fuse_pool_global, pool_t_cost, shift_fn
 from backend.fusion.CoverGenerators import (minterm_entries, pk_entries,
                                             pk_proxy_best, pk_shift_best)
+from backend.OracleSynthesizer import OracleSynthesizer
+from config import config
+from evaluate import count_costs
+from utils.to_qiskit import to_qiskit
 
 
 def random_tt(num_vars):
@@ -96,10 +100,45 @@ def test_pk_shift_routes(num_vars=4, rounds=40, verbose=False):
     print('PKS/PKP route test passed!!!')
 
 
+def test_raw_anf_emission(verbose=False):
+    """C0 implements f exactly and charges each ANF monomial by its literal count.
+
+    Compute coefficients independently by the subset-parity definition, rather than
+    reusing the fast transform or the pool whose costs we are checking.
+    """
+    print('Testing raw ANF emission (all 3-input functions and boundary cases)...')
+    monomials = [sum(1 << x for x in range(32) if x & mask == mask)
+                 for mask in (1, 3, 7, 31)]
+    cases = [(0, (0, 1)), (3, range(256)), (5, [0, (1 << 32) - 1, 1] + monomials)]
+    for n, functions in cases:
+        for fn in functions:
+            expected = [0, 0]
+            for mask in range(1 << n):
+                coefficient, submask = 0, mask
+                while True:
+                    coefficient ^= (fn >> submask) & 1
+                    if submask == 0:
+                        break
+                    submask = (submask - 1) & mask
+                if coefficient:
+                    expected[0] += config['t_cost'](mask.bit_count())
+                    expected[1] += config['cx_cost'](mask.bit_count())
+            for m2 in (False, True):
+                s = OracleSynthesizer(ancilla_num=0, m2_post=m2)
+                s.allocate_input_qubit(n)
+                tt = TruthTable(fn, n)
+                s.process_cover_route(tt, 'C0')
+                assert s.circ.verify(tt), f'C0 semantics: n={n}, tt={fn}'
+                assert count_costs(to_qiskit(s.circ)) == tuple(expected), (n, fn, expected)
+                assert not s.qubit_mgr.anc, 'C0 allocated an ancilla'
+    print('Raw ANF emission test passed!!!')
+
+
 def main(verbose=False):
     for n, rounds in ((4, 60), (5, 40), (6, 20)):
         test_cover_generators_invariants(n, rounds, verbose)
     test_pk_negative_literals(verbose)
     test_minterm_engine_sanity(verbose)
     test_pk_shift_routes(4, 40, verbose)
+    test_raw_anf_emission(verbose)
     print('====== All cover generator tests passed!!! ======')

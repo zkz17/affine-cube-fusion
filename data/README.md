@@ -1,9 +1,10 @@
 # Data layout and naming conventions
 
 All per-case files are **line-aligned with `test_cases/test_cases_{n}`**: line `i` of any
-per-case file (line 1-based) refers to the truth table given on line `i` of the test-case
+per-case file for a run starting at zero (line 1-based) refers to the truth table on line `i` of the test-case
 file. Each per-case line has the form `tt:value`, where `tt` is the truth-table integer and
 `value` the per-case number (a T or CX cost, or a lower bound).
+For a run starting at `start`, output line `i` corresponds to input line `start + i`.
 
 ## Directory overview
 
@@ -15,7 +16,7 @@ data/
   sshr_cost/         sshr_{t,cx}_cost_{n}: SSHR baseline T/CX cost per case (filled n=3..6;
                      the n=7..10 files are empty), sshr_time_{n} (n=3..6)
   our_cost/
-    {path}/          one folder per route (path = tag): A C F FP G MT MT0 PK PK0 PKP PKS.
+    {path}/          one folder per base route: A C C0 F FP G MT MT0 PK PK0 PKP PKS.
                      Each folder holds the default (m2=1) and `_noM2` (m2=0) runs:
                      our_t_cost_{tag}_{n}_{start}_{stop}.txt   (per-case T cost)
                      our_cx_cost_{tag}_{n}_{start}_{stop}.txt  (per-case CX cost)
@@ -31,9 +32,10 @@ data/
 
 ## Naming rules
 
-- `path` (the evaluate.py argument) is also the `tag` and the folder name; it is one of:
+- `path` (the evaluate.py argument) is the base route and folder name; it is one of:
   - `A`    BDD path
   - `C`    ANF path
+  - `C0`   raw ANF cover, fusion engine off
   - `F`    FPRM path with shift search (the production default)
   - `FP`   FPRM path with the proxy prescreen
   - `G`    GL(n,2) local search
@@ -48,33 +50,52 @@ data/
 - Default runs are produced with the macro-M2 post-processing **on** (`m2=1`, plain tag);
   comparison runs with it **off** (`m2=0`) carry the `_noM2` tag suffix and live in the
   same per-path folder.
+- `C0`, `MT0`, and `PK0` ignore `m2`, always use their plain tag, and skip fusion,
+  macro moves, and segment reordering. All three use the same raw emission policy.
+- Evaluation uses zero ancillas and verifies every circuit against its truth table.
+  Verification and Qiskit conversion are excluded from `avg synthesize wall`.
 - The G-3 lower bound `t(deg f)` depends only on `(n, tt)`; evaluate.py computes it on the
   fly in the `our_results` report. The old per-n files in `deg_bound/` are historical only.
 - `reorder` (default 1) affects only the A/BDD path.
 
 ## Coverage
 
-| n | test_cases | classic runs (A / C / F / FP / G) | new cover runs (MT / MT0 / PK / PK0 / PKP / PKS) | `_noM2` runs (A / C / F / FP) | Exorcism | SSHR |
+| n | test_cases | classic runs (A / C / F / FP / G) | cover runs (C0 / MT / MT0 / PK / PK0 / PKP / PKS) | `_noM2` runs (A / C / F / FP) | Exorcism | SSHR |
 |---|---|---|---|---|---|---|
 | 3 | 256 (exhaustive) | 256 (all) | — | — | 256 | 256 |
 | 4 | 65536 (exhaustive) | 65536 (all) | — | 1000 | 65536 | 65536 |
 | 5 | 10000 | 10000 (all) | 1000 | 1000 | 10000 | 10000 |
 | 6 | 10000 | 10000 (all) | 1000 | 1000 | 10000 | 10000 |
-| 7 | 10000 | 10000 (A/C/F/G), FP also 1000 | 1000 | 1000 | 10000 | — (file empty) |
+| 7 | 10000 | 10000 (all) | 1000 | 1000 | 10000 | — (file empty) |
 | 8 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 10000 | — (file empty) |
 | 9 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 10000 | — (file empty) |
 | 10 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 10000 | — (file empty) |
 | 11 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 1000 | — (no files) |
 
-G runs exist for n=3..7 only; all other routes stop at n=11.
+G runs exist for n=3..7 only; all other routes stop at n=11. FP also has a historical
+n=7 summary for the first 1000 cases, but its saved per-case costs cover 10000 cases.
 
 ## Reproducing a run
 
 ```bash
 python evaluate.py <n> <start> <stop> <path> [m2] [reorder]
-#  path is one of A C F FP G MT MT0 PK PK0 PKP PKS; m2=0 produces the _noM2 comparison runs
+#  path is one of A C C0 F FP G MT MT0 PK PK0 PKP PKS; m2=0 produces the _noM2 comparison runs
 #  (default m2=1); reorder (default 1) only affects path A
 ```
+
+Raw ANF results use `data/our_cost/C0/our_{t,cx}_cost_C0_{n}_0_1000.txt` for
+`n=5..11`, matching the starting-cover comparison subsets. Reproduce one group with
+`python evaluate.py 8 0 1000 C0`. These C0 measurements were collected on 2026-09-17
+with an AMD Ryzen 9 7945HX, WSL2 Linux 6.6.87.2, Python 3.12.3, NumPy 2.5.2,
+Qiskit 2.5.2, and SciPy 1.18.0. Groups ran sequentially; the reported time includes
+synthesis only, excluding circuit verification, Qiskit conversion, and file I/O.
+The committed code, input cases, per-case costs, and TXT summaries identify the experiment;
+no separate metadata JSON is required. Older routes were measured in earlier runs, so
+runtime comparisons are descriptive rather than a controlled timing experiment.
+
+`python -m experiments.data_summary` summarizes the largest saved batch per route and prints
+its input interval. Compare route totals only on identical intervals (the cover comparison
+uses `[0,1000)` for n=5..11). Each Exorcism reduction uses that route's own interval.
 
 ## Comparing M2 vs no-M2
 

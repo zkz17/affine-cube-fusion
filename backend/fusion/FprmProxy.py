@@ -4,7 +4,7 @@ Plan A: FPRM fusion-free proxy prescreen (probe P1 passed, top-8 retention 71.7%
 
 Flow:
   enumerate all 2^n shifts, each only doing the Möbius transform (no fusion), computing proxy scores
-    S0 = Σ t(n−|S|)   (exact pre-fusion ΣT)
+    S0 = Σ t(n−|S|)   (legacy heuristic, not the raw ANF cost Σ t(|S|))
     P  = count of one-variable-apart pairs (density of C3 necessarily-fusible pairs)
     S1 = S0 − P       (smaller is better)
   take the top-k candidates (sorted by (S1, c) ascending, deterministic) and always include c=0;
@@ -17,7 +17,8 @@ default F path
   - n ≤ 8: default F is full-enumeration complete fusion, the proxy version is 12%~28% worse in quality
     (P1 measurements) -- the choice relation allows switching on demand; no min, so tests are not slowed
     and differences are not masked (owner's instruction, exploration-phase discipline).
-Always including c=0 implies the proxy result ≤ the C path (dominance chain preserved).
+Always including c=0 implies the proxy result ≤ the C path before M2 post-processing.
+The heuristic is retained to reproduce the saved FP measurements.
 """
 from config import config
 from backend.fusion.BranchFusion import anf_pool, fuse_pool_global, pool_t_cost, shift_fn

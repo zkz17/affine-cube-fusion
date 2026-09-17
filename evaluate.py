@@ -15,10 +15,11 @@ CX_COST_FN = config['cx_cost']
 # All supported synthesis routes, selected by a single `path` argument.
 # A/C/F are the BDD/ANF/FPRM routes, FP is F with the proxy prescreen, G the GL search,
 # MT/PK the engine routes over the minterm / pseudo-Kronecker covers, PKS/PKP their
-# shift-search variants, and MT0/PK0 the raw covers emitted without the fusion engine.
-ROUTES = ('A', 'C', 'F', 'FP', 'G', 'MT', 'PK', 'PKS', 'PKP', 'MT0', 'PK0')
+# shift-search variants, and C0/MT0/PK0 the raw covers emitted without the fusion engine.
+ROUTES = ('A', 'C', 'F', 'FP', 'G', 'MT', 'PK', 'PKS', 'PKP', 'C0', 'MT0', 'PK0')
 ENGINE_ROUTES = ('A', 'C', 'F', 'FP', 'G', 'MT', 'PK', 'PKS', 'PKP')
-COVER_ROUTES = ('MT', 'PK', 'PKS', 'PKP', 'MT0', 'PK0')
+RAW_ROUTES = ('C0', 'MT0', 'PK0')
+COVER_ROUTES = ('MT', 'PK', 'PKS', 'PKP') + RAW_ROUTES
 
 
 def count_costs(circ):
@@ -109,21 +110,22 @@ def _compare(name, cases, ours, baseline):
 
 def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=True):
     """
-    Comparison of the fused backend against Exorcism / SSHR (T and CX dual scopes).
+    Compare a synthesis route against Exorcism / SSHR (T and CX dual scopes).
 
     Usage: evaluate.py <n> <start> <stop> <path> [m2] [reorder]
 
-    path    : the synthesis route, one of A / C / F / FP / G / MT / PK / PKS / PKP / MT0 / PK0.
+    path    : the synthesis route, one of A / C / F / FP / G / MT / PK / PKS / PKP / C0 / MT0 / PK0.
               A = BDD decomposition, C = plain ANF, F = FPRM (shift search), FP = F with the
               proxy prescreen, G = deterministic GL(n,2) search, MT/PK = minterm /
               pseudo-Kronecker covers fused by the engine, PKS/PKP = their shift-search
-              variants, MT0/PK0 = the raw covers emitted without the fusion engine (baselines).
+              variants, C0/MT0/PK0 = raw ANF/minterm/PK covers emitted without fusion (baselines).
     m2      : macro M2 interleaved post-processing (1 = on, default; 0 = off, tagged `_noM2`).
-              Ignored for MT0/PK0, which skip the engine entirely.
+              Ignored for C0/MT0/PK0, which skip the engine entirely.
     reorder : variable reordering for the BDD route A only (1 = on, default).
 
-    Outputs are written to `data/our_cost/{tag}/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt` and
-    `data/our_cost/{tag}/our_results_{tag}_{n}_{a}_{b}.txt`. The G-3 degree lower bound is
+    Outputs are written to `data/our_cost/{path}/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt` and
+    `data/our_cost/{path}/our_results_{tag}_{n}_{a}_{b}.txt`. Both M2 settings share the
+    base route directory; only filenames carry the `_noM2` suffix. The G-3 degree lower bound is
     reported inside the results file but no longer written as a separate file (it depends
     only on the test set, not on the route).
     """
@@ -139,21 +141,22 @@ def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=
     _, sshr_t = load_aligned(cases_path, f'data/sshr_cost/sshr_t_cost_{num_var}', start, stop)
     _, sshr_cx = load_aligned(cases_path, f'data/sshr_cost/sshr_cx_cost_{num_var}', start, stop)
 
-    tag = path if path in ('MT0', 'PK0') else path + ('' if m2_post else '_noM2')
-    outdir = f'data/our_cost/{tag}'
+    tag = path if path in RAW_ROUTES else path + ('' if m2_post else '_noM2')
+    outdir = f'data/our_cost/{path}'
     os.makedirs(outdir, exist_ok=True)
-    out_t = open(f'{outdir}/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
-    out_cx = open(f'{outdir}/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w')
+    out_t = open(f'{outdir}/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w', encoding='utf-8')
+    out_cx = open(f'{outdir}/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w', encoding='utf-8')
 
+    # Ancilla-assisted synthesis is not an evaluation option: every route uses zero ancillas.
+    kwargs = dict(reorder=reorder, ancilla_num=0, fused_backend=True, m2_post=m2_post)
     if path == 'G':
-        synthesizer = OracleSynthesizer(fused_backend=True, gl_search=True, m2_post=m2_post)
+        kwargs['gl_search'] = True
     else:
-        kwargs = dict(reorder=reorder, fused_backend=True, m2_post=m2_post)
         if path in ('A', 'C', 'F', 'FP'):
             kwargs['paths'] = ('A',) if path == 'A' else ('C',) if path == 'C' else ('F',)
             if path == 'FP':
                 kwargs['fprm_proxy'] = True
-        synthesizer = OracleSynthesizer(**kwargs)
+    synthesizer = OracleSynthesizer(**kwargs)
     cover = path if path in COVER_ROUTES else None
 
     ours_t, ours_cx, bounds = [], [], []
@@ -170,6 +173,9 @@ def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=
         else:
             synthesizer.synthesize(truth_table)
         wall_ns += time.perf_counter_ns() - t0
+        # Verify every emitted circuit, outside the reported synthesis timing.
+        if not synthesizer.circ.verify(truth_table):
+            raise AssertionError(f'circuit verification failed: path={tag}, n={num_var}, tt={tt}')
         t, cx = count_costs(to_qiskit(synthesizer.circ))
         bound = T_COST_FN(anf_degree(truth_table.bitstr, num_var))
 
@@ -183,7 +189,7 @@ def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=
     out_cx.close()
 
     avg_wall_ms = wall_ns / max(total, 1) / 1e6
-    report = [f"****** Comparison of TDD-based Method Alg. 1 (fused backend) ******",
+    report = ["****** Comparison of oracle synthesis routes ******",
               f"number of input variables: {num_var} ({total} cases); path={tag}",
               f"avg synthesize wall: {avg_wall_ms:.2f} ms/case"]
     report += _compare("Exorcism T", cases, ours_t, exor_t)
@@ -195,7 +201,7 @@ def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=
     report.append("****** ****** ******")
 
     text = '\n'.join(report) + '\n'
-    with open(f'{outdir}/our_results_{tag}_{num_var}_{start}_{stop}.txt', 'w') as f:
+    with open(f'{outdir}/our_results_{tag}_{num_var}_{start}_{stop}.txt', 'w', encoding='utf-8') as f:
         f.write(text)
     print(text, end='')
 
