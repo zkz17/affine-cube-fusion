@@ -11,13 +11,13 @@ Flow:
   full fusion runs only on these k+1 candidates.
 
 Design position (choice relation, NOT min): with fprm_proxy=True the proxy version **replaces** the
-default F path
+default FS path
   - n ≥ 9: proxy full enumeration + top-k fusion, intended to upgrade the current shift climb2
     (a more complete enumeration);
-  - n ≤ 8: default F is full-enumeration complete fusion, the proxy version is 12%~28% worse in quality
+  - n ≤ 8: default FS is full-enumeration complete fusion, the proxy version is 12%~28% worse in quality
     (P1 measurements) -- the choice relation allows switching on demand; no min, so tests are not slowed
     and differences are not masked (owner's instruction, exploration-phase discipline).
-Always including c=0 implies the proxy result ≤ the C path before M2 post-processing.
+Always including c=0 implies the proxy result ≤ the F path before M2 post-processing.
 The heuristic is retained to reproduce the saved FP measurements.
 """
 from config import config

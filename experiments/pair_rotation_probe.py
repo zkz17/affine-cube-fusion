@@ -7,7 +7,7 @@ for any w ∈ K_d, {A,B} → {A∘τ_w, B∘τ_w} preserves the pool XOR and eac
 while changing the coset position relative to third-party segments (the fusion relation truly changes).
 
 Setup:
-  (a) fused fixed point of the FPRM optimal shift (current F-path final value);
+  (a) fused fixed point of the FPRM optimal shift (current FS-path final value);
   (b) local search on the fixed-point pool of (a) via pair rotation + full-pool re-fusion (T monotonically decreases, strict improvement);
   (c) GL search (production gl_search, deterministic).
 

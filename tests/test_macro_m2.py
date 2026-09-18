@@ -5,7 +5,7 @@ Macro M2 interleaved post-processing tests (only n ≤ 7, per the testing discip
 Invariants:
   1. module-level: XOR invariant, T monotonicity (m2_interleaved output ≤ input pool), determinism,
      and **differential agreement** between dim-bucket prescreening and full scan (same optimal total gain);
-  2. end-to-end (five configs A/C/F/FP/G): emitted T with m2_post=True ≤ the same config with
+  2. end-to-end (five configs A/F/FS/FP/FG): emitted T with m2_post=True ≤ the same config with
      m2_post=False case by case (the macro only makes strictly improving moves ⇒ zero regression), and emitted compute_tt passes;
   3. determinism: with m2_post=True, two synthesis runs have bit-identical T/CX.
 """
@@ -62,8 +62,8 @@ def test_m2_module_invariants(num_vars=5, rounds=60, verbose=False):
 
 
 def _configs():
-    return [('F', False, False), ('A', False, False), ('C', False, False),
-            ('FP', False, True), ('G', True, False)]
+    return [('FS', False, False), ('A', False, False), ('F', False, False),
+            ('FP', False, True), ('FG', True, False)]
 
 
 def test_m2_post_end_to_end(num_vars=5, rounds=30, verbose=False):
@@ -75,12 +75,12 @@ def test_m2_post_end_to_end(num_vars=5, rounds=30, verbose=False):
         off = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                       gl_search=gl, fprm_proxy=proxy,
                                       paths=('A',) if cfg == 'A' else
-                                            ('C',) if cfg == 'C' else ('F',),
+                                            ('F',) if cfg == 'F' else ('FS',),
                                       m2_post=False)
         on = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                      gl_search=gl, fprm_proxy=proxy,
                                      paths=('A',) if cfg == 'A' else
-                                           ('C',) if cfg == 'C' else ('F',),
+                                           ('F',) if cfg == 'F' else ('FS',),
                                      m2_post=True)
         better = same = 0
         for _ in range(rounds):
@@ -108,12 +108,12 @@ def test_m2_post_determinism(num_vars=5, rounds=20, verbose=False):
         s1 = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                      gl_search=gl, fprm_proxy=proxy,
                                      paths=('A',) if cfg == 'A' else
-                                           ('C',) if cfg == 'C' else ('F',),
+                                           ('F',) if cfg == 'F' else ('FS',),
                                      m2_post=True)
         s2 = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                      gl_search=gl, fprm_proxy=proxy,
                                      paths=('A',) if cfg == 'A' else
-                                           ('C',) if cfg == 'C' else ('F',),
+                                           ('F',) if cfg == 'F' else ('FS',),
                                      m2_post=True)
         for _ in range(rounds):
             tt = random_tt(n)

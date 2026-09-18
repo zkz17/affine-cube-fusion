@@ -13,12 +13,12 @@ T_COST_FN = config['t_cost']
 CX_COST_FN = config['cx_cost']
 
 # All supported synthesis routes, selected by a single `path` argument.
-# A/C/F are the BDD/ANF/FPRM routes, FP is F with the proxy prescreen, G the GL search,
+# A/F/FS are the BDD/ANF/FPRM routes, FP is FS with the proxy prescreen, FG the GL search,
 # MT/PK the engine routes over the minterm / pseudo-Kronecker covers, PKS/PKP their
-# shift-search variants, and C0/MT0/PK0 the raw covers emitted without the fusion engine.
-ROUTES = ('A', 'C', 'F', 'FP', 'G', 'MT', 'PK', 'PKS', 'PKP', 'C0', 'MT0', 'PK0')
-ENGINE_ROUTES = ('A', 'C', 'F', 'FP', 'G', 'MT', 'PK', 'PKS', 'PKP')
-RAW_ROUTES = ('C0', 'MT0', 'PK0')
+# shift-search variants, and F0/MT0/PK0 the raw covers emitted without the fusion engine.
+ROUTES = ('A', 'F', 'FS', 'FP', 'FG', 'MT', 'PK', 'PKS', 'PKP', 'F0', 'MT0', 'PK0')
+ENGINE_ROUTES = ('A', 'F', 'FS', 'FP', 'FG', 'MT', 'PK', 'PKS', 'PKP')
+RAW_ROUTES = ('F0', 'MT0', 'PK0')
 COVER_ROUTES = ('MT', 'PK', 'PKS', 'PKP') + RAW_ROUTES
 
 
@@ -108,19 +108,19 @@ def _compare(name, cases, ours, baseline):
     ]
 
 
-def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=True):
+def evaluate_all(num_var=3, start=0, stop=None, path='FS', m2_post=True, reorder=True):
     """
     Compare a synthesis route against Exorcism / SSHR (T and CX dual scopes).
 
     Usage: evaluate.py <n> <start> <stop> <path> [m2] [reorder]
 
-    path    : the synthesis route, one of A / C / F / FP / G / MT / PK / PKS / PKP / C0 / MT0 / PK0.
-              A = BDD decomposition, C = plain ANF, F = FPRM (shift search), FP = F with the
-              proxy prescreen, G = deterministic GL(n,2) search, MT/PK = minterm /
+    path    : the synthesis route, one of A / F / FS / FP / FG / MT / PK / PKS / PKP / F0 / MT0 / PK0.
+              A = BDD decomposition, F = plain ANF, FS = FPRM (shift search), FP = FS with the
+              proxy prescreen, FG = deterministic GL(n,2) search, MT/PK = minterm /
               pseudo-Kronecker covers fused by the engine, PKS/PKP = their shift-search
-              variants, C0/MT0/PK0 = raw ANF/minterm/PK covers emitted without fusion (baselines).
+              variants, F0/MT0/PK0 = raw ANF/minterm/PK covers emitted without fusion (baselines).
     m2      : macro M2 interleaved post-processing (1 = on, default; 0 = off, tagged `_noM2`).
-              Ignored for C0/MT0/PK0, which skip the engine entirely.
+              Ignored for F0/MT0/PK0, which skip the engine entirely.
     reorder : variable reordering for the BDD route A only (1 = on, default).
 
     Outputs are written to `data/our_cost/{path}/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt` and
@@ -149,11 +149,11 @@ def evaluate_all(num_var=3, start=0, stop=None, path='F', m2_post=True, reorder=
 
     # Ancilla-assisted synthesis is not an evaluation option: every route uses zero ancillas.
     kwargs = dict(reorder=reorder, ancilla_num=0, fused_backend=True, m2_post=m2_post)
-    if path == 'G':
+    if path == 'FG':
         kwargs['gl_search'] = True
     else:
-        if path in ('A', 'C', 'F', 'FP'):
-            kwargs['paths'] = ('A',) if path == 'A' else ('C',) if path == 'C' else ('F',)
+        if path in ('A', 'F', 'FS', 'FP'):
+            kwargs['paths'] = ('A',) if path == 'A' else ('F',) if path == 'F' else ('FS',)
             if path == 'FP':
                 kwargs['fprm_proxy'] = True
     synthesizer = OracleSynthesizer(**kwargs)
@@ -210,7 +210,7 @@ def main():
     num_var = int(sys.argv[1]) if len(sys.argv) >= 2 else 3
     start   = int(sys.argv[2]) if len(sys.argv) >= 3 else 0
     stop    = int(sys.argv[3]) if len(sys.argv) >= 4 else None
-    path    = sys.argv[4] if len(sys.argv) >= 5 else 'F'
+    path    = sys.argv[4] if len(sys.argv) >= 5 else 'FS'
     m2      = int(sys.argv[5]) if len(sys.argv) >= 6 else 1
     reorder = int(sys.argv[6]) if len(sys.argv) >= 7 else 1
     assert path in ROUTES, f'illegal route: {path}'

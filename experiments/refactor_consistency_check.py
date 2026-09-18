@@ -22,11 +22,11 @@ def check(tag, n, cases, samples):
     kwargs = dict(reorder=True, ancilla_num=0, fused_backend=True)
     if tag == 'A':
         kwargs['paths'] = ('A',)
-    elif tag == 'C':
-        kwargs['paths'] = ('C',)
+    elif tag == 'F':
+        kwargs['paths'] = ('F',)
     elif tag == 'FP':
         kwargs['fprm_proxy'] = True
-    elif tag == 'G':
+    elif tag == 'FG':
         kwargs['gl_search'] = True
     s = OracleSynthesizer(**kwargs)
     step = max(1, cases // samples)
@@ -45,9 +45,9 @@ def check(tag, n, cases, samples):
 
 
 def main():
-    plan = [('F', 4, 65536, 30), ('A', 4, 65536, 30), ('F', 5, 10000, 30),
-            ('F', 6, 10000, 20), ('F', 7, 10000, 10), ('FP', 7, 10000, 10),
-            ('C', 6, 10000, 10), ('G', 6, 10000, 5), ('F', 9, 1000, 10),
+    plan = [('FS', 4, 65536, 30), ('A', 4, 65536, 30), ('FS', 5, 10000, 30),
+            ('FS', 6, 10000, 20), ('FS', 7, 10000, 10), ('FP', 7, 10000, 10),
+            ('F', 6, 10000, 10), ('FG', 6, 10000, 5), ('FS', 9, 1000, 10),
             ('FP', 10, 1000, 5)]
     total_bad = 0
     for tag, n, cases, samples in plan:

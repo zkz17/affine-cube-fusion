@@ -436,7 +436,7 @@ def anf_pool_premerged(bitstr, n):
 
     Note: this is **forced** pairing (before the fusion engine); on individual cases it may be worse than
     letting the greedy engine choose on its own. Hence the production path runs it as a third decomposition
-    path C' alongside C (raw ANF), taking the smaller ΣT per case, so it is never worse per case. Pre-merge
+    path F' alongside F (raw ANF), taking the smaller ΣT per case, so it is never worse per case. Pre-merge
     shrinks the pool substantially (a random f's ANF pool shrinks 30%~50%), and is also a runtime
     optimization at large n (products are still plain cubes and hit the O(popcount) fast path).
     """

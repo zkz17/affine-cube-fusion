@@ -41,20 +41,24 @@ X and CNOT gates are T-free; each explicit CNOT costs one CX, while X gates are 
 
 The evaluation entry supports twelve routes and explicitly uses zero ancillas. The five
 classic pipelines below use `OracleSynthesizer.synthesize` with `ancilla_num=0`;
-the default route is **F**, with M2 enabled (`m2_post=True`).
+the default route is **FS**, with M2 enabled (`m2_post=True`).
 
 | Path | Front-end | Notes |
 |---|---|---|
-| **C** | ANF decomposition (`c = 0`) | the unshifted ANF starting cover followed by fusion |
-| **F** | FPRM shift search | full `2^n` enumeration for `n ≤ 8`, deterministic two-start climb2 for `n ≥ 9` |
-| **FP** | fusion-free proxy prescreen | top-`k` proxy candidates (always including `c = 0`) replace the full F search; a quality/time trade-off |
-| **G** | deterministic `GL(n,2)` local search | steepest ascent over single-CNOT (transvection) moves; a slow, small-`n` enhancement option |
+| **F** | ANF decomposition (`c = 0`) | the unshifted ANF starting cover followed by fusion |
+| **FS** | FPRM shift search | full `2^n` enumeration for `n ≤ 8`, deterministic two-start climb2 for `n ≥ 9` |
+| **FP** | fusion-free proxy prescreen | top-`k` proxy candidates (always including `c = 0`) replace the full FS search; a quality/time trade-off |
+| **FG** | deterministic `GL(n,2)` local search | steepest ascent over single-CNOT (transvection) moves; a slow, small-`n` enhancement option |
 | **A** | LIMDD/BDD graph phase + branch extraction | demonstrates that the same engine consumes BDD branches as well as ANF monomials |
 
 The evaluation entry also supports starting-cover comparisons: **MT** (minterms),
 **PK** (a greedy pseudo-Kronecker-style cover), **PKS** (PK with shift search), and
-**PKP** (PK with proxy prescreening). **C0**, **MT0**, and **PK0** emit the raw ANF,
+**PKP** (PK with proxy prescreening). **F0**, **MT0**, and **PK0** emit the raw ANF,
 minterm, and PK covers without fusion, M2, or segment reordering.
+
+Route names follow the manuscript: the former C0/C/F/G routes are now F0/F/FS/FG,
+respectively. The default remains ANF with shift search, now called **FS**. See
+`data/README.md` for the migration and historical-data naming rules.
 
 Shift search scores candidates after pairwise fusion and applies M2 only to the selected
 pool. Its candidate inclusion guarantees therefore concern the cost before M2.
@@ -85,10 +89,12 @@ pip install -r requirements.txt
 
 python test.py -f -b -a -c -g -e -p -q -r -s -d -x -u -w -m -y -z
 python evaluate.py <n> <start> <stop> <path> [m2] [reorder]
-#   path: A C F FP G MT PK PKS PKP C0 MT0 PK0
+#   path: A F FS FP FG MT PK PKS PKP F0 MT0 PK0
 #   m2=0 adds _noM2 to filenames within the base route directory;
-#   C0/MT0/PK0 ignore m2; reorder affects only A; all routes use zero ancillas.
-python evaluate.py 8 0 1000 C0   # raw ANF baseline on the same 1000-case cover subset
+#   F0/MT0/PK0 ignore m2; reorder affects only A; all routes use zero ancillas.
+python evaluate.py 8 0 1000 F0   # raw ANF baseline on the same 1000-case cover subset
+python evaluate.py 8 0 1000 FS   # ANF + shift search + pairwise fusion + M2
+python evaluate.py 8 0 1000 FS 0 # same route without M2; saves FS_noM2 files under FS/
 ```
 
 Dependencies (numpy, qiskit, scipy) are declared in `requirements.txt`; the code is

@@ -1,29 +1,29 @@
 ****** Comparison of TDD-based Method Alg. 1 (fused backend) ******
 number of input variables: 4 (65536 cases); paths=F
-avg synthesize wall: 2.24 ms/例
+avg synthesize wall: 0.58 ms/例
 ===== Exorcism T =====
-lower  cost in 60402(92.1661376953125%) cases
-higher cost in 0(0.0%) cases
-same   cost in 5134(7.8338623046875%) cases
-cases with higher cost: []
-total cost: baseline 2917123, ours 1796064 (缩减 38.43%)
+lower  cost in 53996(82.391357421875%) cases
+higher cost in 3510(5.3558349609375%) cases
+same   cost in 8030(12.2528076171875%) cases
+cases with higher cost: [1, 3, 5, 10, 11, 12, 13, 14, 17, 31, 34, 35, 44, 48, 49, 50, 55, 56, 68, 69]
+total cost: baseline 2917123, ours 2051534 (缩减 29.67%)
 ===== Exorcism CX =====
-lower  cost in 58470(89.2181396484375%) cases
-higher cost in 4480(6.8359375%) cases
-same   cost in 2586(3.9459228515625%) cases
-cases with higher cost: [15, 19, 30, 31, 39, 45, 47, 49, 51, 54, 55, 57, 59, 71, 75, 76, 79, 83, 85, 86]
-total cost: baseline 2372045, ours 1788410 (缩减 24.60%)
+lower  cost in 47655(72.71575927734375%) cases
+higher cost in 14139(21.57440185546875%) cases
+same   cost in 3742(5.7098388671875%) cases
+cases with higher cost: [1, 3, 5, 9, 10, 11, 12, 13, 14, 15, 17, 19, 20, 24, 27, 29, 30, 31, 33, 34]
+total cost: baseline 2372045, ours 2013298 (缩减 15.12%)
 ===== SSHR T =====
-lower  cost in 48810(74.4781494140625%) cases
-higher cost in 810(1.2359619140625%) cases
-same   cost in 15916(24.285888671875%) cases
-cases with higher cost: [293, 297, 298, 323, 332, 392, 399, 416, 435, 444, 448, 469, 474, 533, 534, 538, 578, 580, 591, 592]
-total cost: baseline 2412912, ours 1796064 (缩减 25.56%)
+lower  cost in 37464(57.16552734375%) cases
+higher cost in 7466(11.3922119140625%) cases
+same   cost in 20606(31.4422607421875%) cases
+cases with higher cost: [1, 3, 5, 6, 9, 10, 11, 12, 13, 14, 17, 18, 20, 23, 24, 27, 29, 31, 33, 34]
+total cost: baseline 2412912, ours 2051534 (缩减 14.98%)
 ===== SSHR CX =====
-lower  cost in 53956(82.330322265625%) cases
-higher cost in 6827(10.41717529296875%) cases
-same   cost in 4753(7.25250244140625%) cases
-cases with higher cost: [7, 15, 19, 21, 25, 26, 27, 28, 29, 30, 31, 37, 38, 39, 42, 45, 46, 47, 51, 53]
-total cost: baseline 2286398, ours 1788410 (缩减 21.78%)
-G-3 下界: Σ t(deg f) = 1228576 (为 ours ΣT 的 68.40%)
+lower  cost in 43720(66.71142578125%) cases
+higher cost in 16479(25.14495849609375%) cases
+same   cost in 5337(8.14361572265625%) cases
+cases with higher cost: [1, 3, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 20, 21, 23, 24, 25]
+total cost: baseline 2286398, ours 2013298 (缩减 11.94%)
+G-3 下界: Σ t(deg f) = 1228576 (为 ours ΣT 的 59.89%)
 ****** ****** ******

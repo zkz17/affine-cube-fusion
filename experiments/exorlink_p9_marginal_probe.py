@@ -3,7 +3,7 @@
 P9-M marginal probe: production end-to-end T/CX comparison for the m2_post switch (five paths).
 
 Synthesize the same batch of test cases directly with the production synthesizer (m2_post=False / True), then after emission count with evaluate.py's count_costs (T/CX dual conventions) —— exactly matching the final production path
-(including G's linear wrapper, B-4 segment reordering, simplify). Sizes n=5/6/7 (25/15/6),
+(including FG's linear wrapper, B-4 segment reordering, simplify). Sizes n=5/6/7 (25/15/6),
 same convention as the P9 probe, only writes experiments/phase0_results/.
 """
 import os
@@ -21,8 +21,8 @@ from backend.OracleSynthesizer import OracleSynthesizer
 
 OUT = os.path.join(ROOT, 'experiments', 'phase0_results', 'exorlink_p9_marginal_probe.txt')
 PROFILE = {5: 25, 6: 15, 7: 6}
-CONFIGS = [('F', False, False), ('A', False, False), ('C', False, False),
-           ('FP', False, True), ('G', True, False)]
+CONFIGS = [('FS', False, False), ('A', False, False), ('F', False, False),
+           ('FP', False, True), ('FG', True, False)]
 
 
 def main():
@@ -34,7 +34,7 @@ def main():
         for cfg, gl, proxy in CONFIGS:
             kwargs = dict(reorder=True, ancilla_num=0, fused_backend=True,
                           gl_search=gl, fprm_proxy=proxy,
-                          paths=('A',) if cfg == 'A' else ('C',) if cfg == 'C' else ('F',))
+                          paths=('A',) if cfg == 'A' else ('F',) if cfg == 'F' else ('FS',))
             off = OracleSynthesizer(m2_post=False, **kwargs)
             on = OracleSynthesizer(m2_post=True, **kwargs)
             for fn in data:

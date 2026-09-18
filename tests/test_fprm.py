@@ -3,9 +3,9 @@
 Phase 3 / G-2.1: tests for the FPRM shift-subgroup search path.
 
 Acceptance scope (see docs/architecture.md, Phase 3 pre-study):
-  - zero regression: the search set contains c=0 ⇒ best-pool ΣT ≤ C-path ΣT;
+  - zero regression: the search set contains c=0 ⇒ best-pool ΣT ≤ F-path ΣT;
   - XOR invariant: the winning pool's XOR = f(x⊕c), which after shifting back by c equals f;
-  - end-to-end: production synthesize (including the F path) verified case by case via compute_tt;
+  - end-to-end: production synthesize (including the FS path) verified case by case via compute_tt;
   - emission cost: after to_qiskit, count_t_cost == fused-pool ΣT (the X(c) sandwich is T-free).
 """
 from random import randint
@@ -48,7 +48,7 @@ def test_fprm_entries(num_vars=5, rounds=150, verbose=False):
 
 
 def test_fprm_end_to_end(num_vars=5, rounds=100, verbose=False):
-    """Production path (including F) end-to-end: compute_tt verification + emission cost == pool ΣT."""
+    """Production path (including FS) end-to-end: compute_tt verification + emission cost == pool ΣT."""
     print(f'Testing FPRM end-to-end with {rounds} random {num_vars}-input functions...')
 
     n = num_vars

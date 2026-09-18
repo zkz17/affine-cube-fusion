@@ -1,29 +1,29 @@
 ****** Comparison of TDD-based Method Alg. 1 (fused backend) ******
 number of input variables: 4 (1000 cases); paths=F_noM2
-avg synthesize wall: 1.89 ms/case
+avg synthesize wall: 0.34 ms/case
 ===== Exorcism T =====
-lower  cost in 841(84.1%) cases
-higher cost in 0(0.0%) cases
-same   cost in 159(15.9%) cases
-cases with higher cost: []
-total cost: baseline 40007, ours 26826 (reduction 32.95%)
+lower  cost in 680(68.0%) cases
+higher cost in 184(18.4%) cases
+same   cost in 136(13.600000000000001%) cases
+cases with higher cost: [1, 2, 3, 4, 5, 9, 10, 11, 12, 13, 14, 16, 17, 30, 31, 33, 34, 35, 44, 47]
+total cost: baseline 40007, ours 33687 (reduction 15.80%)
 ===== Exorcism CX =====
-lower  cost in 750(75.0%) cases
-higher cost in 175(17.5%) cases
+lower  cost in 467(46.7%) cases
+higher cost in 458(45.800000000000004%) cases
 same   cost in 75(7.5%) cases
-cases with higher cost: [15, 19, 30, 31, 39, 45, 47, 49, 51, 54, 55, 57, 59, 71, 75, 76, 79, 83, 85, 86]
-total cost: baseline 32074, ours 26204 (reduction 18.30%)
+cases with higher cost: [1, 2, 3, 4, 5, 9, 10, 11, 12, 13, 14, 15, 16, 17, 19, 20, 24, 27, 29, 30]
+total cost: baseline 32074, ours 32432 (reduction -1.12%)
 ===== SSHR T =====
-lower  cost in 524(52.400000000000006%) cases
-higher cost in 37(3.6999999999999997%) cases
-same   cost in 439(43.9%) cases
-cases with higher cost: [281, 293, 297, 298, 323, 332, 368, 385, 392, 399, 416, 435, 444, 448, 469, 474, 486, 533, 534, 538]
-total cost: baseline 31971, ours 26826 (reduction 16.09%)
+lower  cost in 283(28.299999999999997%) cases
+higher cost in 386(38.6%) cases
+same   cost in 331(33.1%) cases
+cases with higher cost: [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 16, 17, 18, 20, 23, 24, 27, 29]
+total cost: baseline 31971, ours 33687 (reduction -5.37%)
 ===== SSHR CX =====
-lower  cost in 527(52.7%) cases
-higher cost in 335(33.5%) cases
-same   cost in 138(13.8%) cases
-cases with higher cost: [7, 15, 19, 21, 25, 26, 27, 28, 29, 30, 31, 37, 38, 39, 42, 45, 46, 47, 51, 53]
-total cost: baseline 29034, ours 26204 (reduction 9.75%)
-G-3 lower bound: Σ t(deg f) = 18746 (69.88% of ours ΣT)
+lower  cost in 287(28.7%) cases
+higher cost in 647(64.7%) cases
+same   cost in 66(6.6000000000000005%) cases
+cases with higher cost: [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+total cost: baseline 29034, ours 32432 (reduction -11.70%)
+G-3 lower bound: Σ t(deg f) = 18746 (55.65% of ours ΣT)
 ****** ****** ******

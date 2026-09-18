@@ -4,10 +4,10 @@ G-2.2 tests for the optional GL search path (only n ≤ 7, per the testing disci
 
 Invariants:
   1. zero regression: emitted T with gl_search=True ≤ emitted T with the default (False)
-     (the G candidates contain the FPRM-optimal cF itself ⇒ structurally guaranteed; verified case by case here);
+     (the FG candidates contain the FPRM-optimal cF itself ⇒ structurally guaranteed; verified case by case here);
   2. determinism: synthesizing the same truth table twice yields identical emitted T/CX (no randomness);
   3. semantics: the emitted circuit passes compute_tt case by case;
-  4. counting consistency: term-level CX == qiskit-level CX (including the wrapper CNOT when G wins).
+  4. counting consistency: term-level CX == qiskit-level CX (including the wrapper CNOT when FG wins).
 """
 from random import randint
 
@@ -25,8 +25,8 @@ def test_gl_zero_regression(num_vars=5, rounds=40, verbose=False):
     """With gl enabled, T is never worse than the default path, case by case.
 
     Note: m2_post is enabled by default; this assertion keeps the **structural scope** —
-    the comparison side uses m2_post=False explicitly (G candidates contain the FPRM-optimal cF ⇒ structural guarantee).
-    G_on ≤ F_on with m2_post enabled on both sides is empirical (P9-M sample 46/46), not a constraint.
+    the comparison side uses m2_post=False explicitly (FG candidates contain the FPRM-optimal cF ⇒ structural guarantee).
+    FG_on ≤ FS_on with m2_post enabled on both sides is empirical (P9-M sample 46/46), not a constraint.
     """
     print(f'Testing GL zero-regression with {rounds} random {num_vars}-input functions...')
 
@@ -70,7 +70,7 @@ def test_gl_determinism(num_vars=5, rounds=20, verbose=False):
 
 
 def test_gl_counting_consistency(num_vars=5, rounds=20, verbose=False):
-    """Counting consistency including the wrapper CNOT when G wins (term-level == qiskit-level)."""
+    """Counting consistency including the wrapper CNOT when FG wins (term-level == qiskit-level)."""
     print(f'Testing GL counting consistency with {rounds} random {num_vars}-input functions...')
 
     n = num_vars

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Paired F-route timing with/without M2; production algorithms are unchanged.
+"""Paired FS-route timing with/without M2; production algorithms are unchanged.
 
 Default: n=6/9/11, indices 0,50,...,950 (two cases per original sampling
 stratum), three repeats, balanced off/on and on/off order in every repeat.
@@ -53,7 +53,7 @@ FIELDS = ('n case_index repeat position m2 wall_ms cpu_ms search_ms macro_ms '
 
 class TimedSynthesizer(OracleSynthesizer):
     def __init__(self, m2):
-        super().__init__(ancilla_num=0, fused_backend=True, paths=('F',), m2_post=m2)
+        super().__init__(ancilla_num=0, fused_backend=True, paths=('FS',), m2_post=m2)
         self.timing = dict(search_ns=0, emit_ns=0, m2_ns=0, refusion_ns=0, moves=0)
         self.initial_pool = self.final_pool = None
         self.shift = None
@@ -134,11 +134,11 @@ def schedule(indices, repeat):
 def expected_costs(n, functions):
     result = {}
     for mode in (False, True):
-        tag = 'F' if mode else 'F_noM2'
+        tag = 'FS' if mode else 'FS_noM2'
         metrics = []
         for metric in ('t', 'cx'):
             matches = []
-            for path in (ROOT / 'data/our_cost/F').glob(f'our_{metric}_cost_{tag}_{n}_0_*.txt'):
+            for path in (ROOT / 'data/our_cost/FS').glob(f'our_{metric}_cost_{tag}_{n}_0_*.txt'):
                 if int(path.stem.rsplit('_', 1)[1]) >= 1000:
                     matches.append(path)
             assert matches, f'no saved costs: {tag} n={n} {metric}'
@@ -235,10 +235,10 @@ def self_test():
         assert sum(order[0] for _, order in schedule(indices, repeat)) == 10
     orders = [dict(schedule(indices, repeat)) for repeat in (1, 2, 3)]
     assert all(orders[0][i] == orders[1][i][::-1] == orders[2][i] for i in indices)
-    # Use a saved F case with a real M2 move, plus zero/constant/inactive-input cases.
-    base = ROOT / 'data/our_cost/F'
-    off = [tuple(map(int, l.split(':'))) for l in (base / 'our_t_cost_F_noM2_4_0_1000.txt').read_text().splitlines()]
-    on = [tuple(map(int, l.split(':'))) for l in (base / 'our_t_cost_F_4_0_65536.txt').read_text().splitlines()[:1000]]
+    # Use a saved FS case with a real M2 move, plus zero/constant/inactive-input cases.
+    base = ROOT / 'data/our_cost/FS'
+    off = [tuple(map(int, l.split(':'))) for l in (base / 'our_t_cost_FS_noM2_4_0_1000.txt').read_text().splitlines()]
+    on = [tuple(map(int, l.split(':'))) for l in (base / 'our_t_cost_FS_4_0_65536.txt').read_text().splitlines()[:1000]]
     fn_move = next(a[0] for a, b in zip(off, on) if a[1] > b[1])
     saw_move = False
     original = (ORACLE.m2_interleaved, MACRO.fuse_pool_global)
@@ -288,7 +288,7 @@ def main():
     if Path('/proc/cpuinfo').exists():
         cpu = next(l.split(':', 1)[1].strip() for l in Path('/proc/cpuinfo').read_text().splitlines()
                    if l.startswith('model name'))
-    header = ['M2 paired timing probe: F, zero ancillas, production search/emission',
+    header = ['M2 paired timing probe: FS, zero ancillas, production search/emission',
               f'started UTC: {datetime.now(timezone.utc).isoformat()}',
               f'git revision: {subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()}',
               f'source SHA256 (including probe): {signature}',

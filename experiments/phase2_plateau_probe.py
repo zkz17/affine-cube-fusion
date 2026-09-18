@@ -4,7 +4,7 @@ Phase 2 hypothesis-testing probe (G-1a / G-1b): are plateau moves worthwhile?
 
 Control setup (line-by-line consistent with the production backend):
   A pool = OracleSynthesizer._bdd_entries(tt) (graph-stage product, with root masks);
-  C pool = anf_pool(tt.bitstr, n) (pure algebraic product).
+  F pool = anf_pool(tt.bitstr, n) (pure algebraic product).
 
 Three variants per pool:
   1. strict       : fuse_pool_global(entries, n)                      -- current state (gain > 0)
@@ -12,7 +12,7 @@ Three variants per pool:
   3. neutral+cat  : same as above, but first inject zero-cost catalyst triples {[x_j=1], [x_j=0], 1} for all j
                     (ΣT=0, XOR=0 ⇒ pool invariant preserved)          -- G-1b
 
-Production-grade metrics: base = min(A_strict, C_strict); improved = min(A_best, C_best).
+Production-grade metrics: base = min(A_strict, F_strict); improved = min(A_best, F_best).
 Judgment: whether the ΣT reduction of improved over base is significant (refer to the decision-convention threshold ~0.5%).
 
 Output: experiments/phase0_results/phase2_plateau_probe.txt
@@ -116,11 +116,11 @@ def main():
                 if ra[name] <= min(ra.values()):
                     stat[f'A_win_{name}'] += 1
                 if rc[name] <= min(rc.values()):
-                    stat[f'C_win_{name}'] += 1
+                    stat[f'F_win_{name}'] += 1
             stat['A_best_neutral'] += (ra['neutral'] < ra['strict'])
             stat['A_best_cat'] += (ra['neutral+cat'] < min(ra['strict'], ra['neutral']))
-            stat['C_best_neutral'] += (rc['neutral'] < rc['strict'])
-            stat['C_best_cat'] += (rc['neutral+cat'] < min(rc['strict'], rc['neutral']))
+            stat['F_best_neutral'] += (rc['neutral'] < rc['strict'])
+            stat['F_best_cat'] += (rc['neutral+cat'] < min(rc['strict'], rc['neutral']))
         wall = time.perf_counter() - t0
 
         msg = [
@@ -128,9 +128,9 @@ def main():
             f'ΣT: base={s_base} improved={s_imp}(Δ {s_imp - s_base:+d}, {(s_base - s_imp) / max(s_base, 1):.2%})',
             f'cases: better={stat["better"]} same={stat["same"]}',
             f'A-pool best-variant distribution: strict={stat["A_win_strict"]} neutral={stat["A_win_neutral"]} neutral+cat={stat["A_win_neutral+cat"]}',
-            f'C-pool best-variant distribution: strict={stat["C_win_strict"]} neutral={stat["C_win_neutral"]} neutral+cat={stat["C_win_neutral+cat"]}',
-            f'neutral strictly better than strict: A {stat["A_best_neutral"]} cases / C {stat["C_best_neutral"]} cases;'
-            f' cat better still than neutral: A {stat["A_best_cat"]} / C {stat["C_best_cat"]}',
+            f'F-pool best-variant distribution: strict={stat["F_win_strict"]} neutral={stat["F_win_neutral"]} neutral+cat={stat["F_win_neutral+cat"]}',
+            f'neutral strictly better than strict: A {stat["A_best_neutral"]} cases / F {stat["F_best_neutral"]} cases;'
+            f' cat better still than neutral: A {stat["A_best_cat"]} / F {stat["F_best_cat"]}',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']

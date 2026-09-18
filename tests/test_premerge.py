@@ -7,7 +7,7 @@ Acceptance scope (see docs/architecture.md, section 1.2):
   - pool XOR invariant (before/after premerge and after fusion);
   - every premerged product is a valid affine cube;
   - end-to-end synthesize verified case by case + fused ΣT statistics compared with the raw ANF pool
-    (per-case non-worsening is structurally guaranteed by min(A, C, C′); here we only observe statistics).
+    (per-case non-worsening is structurally guaranteed by min(A, F, F′); here we only observe statistics).
 """
 from collections import Counter
 from random import randint
@@ -80,7 +80,7 @@ def test_premerge_invariant(num_vars=6, rounds=200, verbose=False):
 
 
 def test_premerge_end_to_end(num_vars=5, rounds=120, verbose=False):
-    """End-to-end: synthesis verified case by case via compute_tt (through the min(A, C, C′) backend)."""
+    """End-to-end: synthesis verified case by case via compute_tt (through the min(A, F, F′) backend)."""
     print(f'Testing premerge end-to-end with {rounds} random {num_vars}-input functions...')
 
     n = num_vars

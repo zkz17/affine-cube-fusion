@@ -7,17 +7,17 @@ apply → re-fuse, loop; bounded by the interleave round limit. Control V0 = pur
 
 The **pre-fusion** pools of the five paths:
   A  = BDD graph-stage product (split on, absorb removed);
-  C  = anf_pool(f) (c=0);
-  F  = anf_pool(f∘τ_cF) (FPRM optimal shift);
+  F  = anf_pool(f) (c=0);
+  FS  = anf_pool(f∘τ_cF) (FPRM optimal shift);
   FP = anf_pool(f∘τ_cFp) (fprm_proxy optimal shift);
-  G  = gl_search result pool (kept+standalone; the pool body is the decomposition of g=f(Ax⊕c)).
+  FG  = gl_search result pool (kept+standalone; the pool body is the decomposition of g=f(Ax⊕c)).
 
 Verification:
   - after every fusion/macro application, assert the pool XOR invariant;
-  - the final pools of the A/C/F/FP paths are emitted through the production emission pipeline
+  - the final pools of the A/F/FS/FP paths are emitted through the production emission pipeline
     (shift sandwich + root sandwich + B-4 reordering + simplify) and must have compute_tt == f;
-    the G path's linear wrapper belongs to the emission layer, so only the pool XOR == g is checked
-    (the emission layer does not take part in M2, so G only measures pool-level marginals).
+    the FG path's linear wrapper belongs to the emission layer, so only the pool XOR == g is checked
+    (the emission layer does not take part in M2, so FG only measures pool-level marginals).
 Isolation: read only data/test_cases, write only experiments/phase0_results/.
 """
 import os
@@ -176,11 +176,11 @@ def run_case(fn, n, acc):
 
     t0 = time.perf_counter()
     entries_c = anf_pool(fn, n)
-    acc['C_prep_wall'] += time.perf_counter() - t0
+    acc['F_prep_wall'] += time.perf_counter() - t0
 
     t0 = time.perf_counter()
     _, cF = fprm_best(fn, n)
-    acc['F_prep_wall'] += time.perf_counter() - t0
+    acc['FS_prep_wall'] += time.perf_counter() - t0
 
     t0 = time.perf_counter()
     _, _, cFp = fprm_proxy_best(fn, n)
@@ -188,15 +188,15 @@ def run_case(fn, n, acc):
 
     t0 = time.perf_counter()
     kept_g, st_g, c_g, cnots_g = gl_search(fn, n)
-    acc['G_prep_wall'] += time.perf_counter() - t0
+    acc['FG_prep_wall'] += time.perf_counter() - t0
 
     g_pool = [(cb, r, key) for cb, r, key in kept_g] + [(cb, 0, None) for cb in st_g]
     pools = {
         'A': (entries_a, fn, 0),
-        'C': (entries_c, fn, 0),
-        'F': (anf_pool(shift_fn(fn, cF, n), n), shift_fn(fn, cF, n), cF),
+        'F': (entries_c, fn, 0),
+        'FS': (anf_pool(shift_fn(fn, cF, n), n), shift_fn(fn, cF, n), cF),
         'FP': (anf_pool(shift_fn(fn, cFp, n), n), shift_fn(fn, cFp, n), cFp),
-        'G': (g_pool, g_of_cnots(fn, c_g, cnots_g, n), None),
+        'FG': (g_pool, g_of_cnots(fn, c_g, cnots_g, n), None),
     }
     for pname, (entries, expect, shift_c) in pools.items():
         t0 = time.perf_counter()
@@ -212,7 +212,7 @@ def run_case(fn, n, acc):
         acc[f'{pname}_m2'] += st['m2']
         acc[f'{pname}_m2_gain'] += st['m2_gain']
         acc[f'{pname}_m2_neutral'] += st['m2_neutral']
-        if pname != 'G':
+        if pname != 'FG':
             emit_and_verify(pool1, fn, n, shift_c)
             acc[f'{pname}_emit_ok'] += 1
     acc['cases'] += 1
@@ -228,22 +228,22 @@ def main():
             run_case(fn, n, acc)
         c = acc['cases']
         msg = [f'====== n = {n}({cases} cases)======']
-        for pname in ('A', 'C', 'F', 'FP', 'G'):
+        for pname in ('A', 'F', 'FS', 'FP', 'FG'):
             v0, v1 = acc[f'{pname}_V0'], acc[f'{pname}_V1']
             msg.append(f'{pname:>3} pool: V0={v0}  V1={v1}  ({(v1/v0-1):+.2%},better '
                        f'{acc[f"{pname}_V1_better"]}/{c}, M2 {acc[f"{pname}_m2"]} times/Σgain '
                        f'{acc[f"{pname}_m2_gain"]},neutral pairs '
                        f'{acc[f"{pname}_m2_neutral"]})')
-        msg.append(f'A/C/F/FP emission-level compute_tt verification: {acc["A_emit_ok"]}/{c} passed')
-        for pname in ('A', 'C', 'F', 'FP', 'G'):
+        msg.append(f'A/F/FS/FP emission-level compute_tt verification: {acc["A_emit_ok"]}/{c} passed')
+        for pname in ('A', 'F', 'FS', 'FP', 'FG'):
             prep = acc[f'{pname}_prep_wall'] / c
             v0 = acc[f'{pname}_V0_wall'] / c
             v1 = acc[f'{pname}_V1_wall'] / c
             msg.append(f'{pname:>3} time (ms/case): prep={prep*1e3:8.2f}  V0 fusion={v0*1e3:7.2f}  '
                        f'V1 fusion+M2={v1*1e3:7.2f}  M2 increment={max(v1-v0,0)*1e3:6.2f}')
         fp_m2 = (acc['FP_prep_wall'] + acc['FP_V1_wall']) / c
-        f_orig = (acc['F_prep_wall'] + acc['F_V0_wall']) / c
-        msg.append(f'FP+M2 total time (prep+V1)={fp_m2*1e3:.2f} ms/case  vs  original F (prep+V0)='
+        f_orig = (acc['FS_prep_wall'] + acc['FS_V0_wall']) / c
+        msg.append(f'FP+M2 total time (prep+V1)={fp_m2*1e3:.2f} ms/case  vs  original FS (prep+V0)='
                    f'{f_orig*1e3:.2f} ms/case  ({(fp_m2/f_orig-1):+.1%})')
         print('\n'.join(msg), flush=True)
         lines += msg + ['']

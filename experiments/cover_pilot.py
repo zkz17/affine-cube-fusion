@@ -3,7 +3,7 @@
 Pilot run for the experimental starting-cover routes (branch exp/starting-cover-routes).
 
 Measures, per test case and per configuration (MT / PK, each with M2 on/off):
-T, CX, wall, and verify; prints per-n aggregates together with the F-route reference
+T, CX, wall, and verify; prints per-n aggregates together with the FS-route reference
 and the degree lower bound. Small case counts (5 per n for n=6..9, 2 for n=10/11).
 
 Writes the table to experiments/phase0_results/cover_pilot.txt.
@@ -28,7 +28,7 @@ ROUTES = (('MT', True), ('MT', False), ('PK', True), ('PK', False))
 
 
 def main():
-    lines = ['Cover-route pilot (MT/PK x M2 on/off, T / CX / wall, with F reference and degree bound)', '']
+    lines = ['Cover-route pilot (MT/PK x M2 on/off, T / CX / wall, with FS reference and degree bound)', '']
     for n, cases in PROFILE.items():
         fns = [int(l) for l in open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
         acc = {f'{r}{m2}': [0, 0, 0.0] for r, m2 in [('MT', 'on'), ('MT', 'off'), ('PK', 'on'), ('PK', 'off')]}
@@ -63,7 +63,7 @@ def main():
         for r, m2 in ROUTES:
             key = f'{r}{"on" if m2 else "off"}'
             msg.append(f'{key:<10}{acc[key][0]:>10}{acc[key][1]:>10}{acc[key][2]/cases*1e3:>13.1f}')
-        msg.append(f'{"F(ref)":<10}{f_ref[0]:>10}{f_ref[1]:>10}{f_ref[2]/cases*1e3:>13.1f}')
+        msg.append(f'{"FS(ref)":<10}{f_ref[0]:>10}{f_ref[1]:>10}{f_ref[2]/cases*1e3:>13.1f}')
         msg.append(f'{"deg bound":<10}{bound_sum:>10}')
         print('\n'.join(msg), flush=True)
         lines += msg + ['']

@@ -15,9 +15,9 @@ from utils.to_qiskit import to_qiskit
 
 def reference_costs(route, functions, m2):
     """Explicit zero-ancilla synthesis is the reference for the public evaluator."""
-    s = OracleSynthesizer(ancilla_num=0, m2_post=m2, gl_search=route == 'G',
+    s = OracleSynthesizer(ancilla_num=0, m2_post=m2, gl_search=route == 'FG',
                          fprm_proxy=route == 'FP',
-                         paths=(route,) if route in ('A', 'C') else ('F',))
+                         paths=(route,) if route in ('A', 'F') else ('FS',))
     result = []
     for fn in functions:
         tt = TruthTable(fn, 4)
@@ -73,7 +73,7 @@ def test_evaluation_routes(verbose=False):
         with patch.object(OracleSynthesizer, 'synthesize', autospec=True,
                           side_effect=lambda self, tt: self.clear()), redirect_stdout(StringIO()):
             try:
-                evaluate_all(4, 0, 1, 'F')
+                evaluate_all(4, 0, 1, 'FS')
             except AssertionError as exc:
                 assert 'circuit verification failed' in str(exc)
             else:
@@ -85,7 +85,7 @@ def test_summary_ranges():
     """Consumers match separate batches and use the correct nonzero input interval."""
     with TemporaryDirectory() as tmp:
         root = Path(tmp)
-        route = root / 'our_cost' / 'C'
+        route = root / 'our_cost' / 'F'
         route.mkdir(parents=True)
         (root / 'test_cases').mkdir()
         (root / 'exorcism_cost').mkdir()
@@ -95,7 +95,7 @@ def test_summary_ranges():
             ''.join(f'{fn}:{cost}\n' for fn, cost in zip(functions, [999, 40, 40, 60])))
 
         for start, stop, tc, cx in [(1, 2, [20], [10]), (2, 4, [30, 50], [15, 25])]:
-            for tag, extra in [('C', 0), ('C_noM2', 10)]:
+            for tag, extra in [('F', 0), ('F_noM2', 10)]:
                 for metric, costs in [('t', tc), ('cx', cx)]:
                     (route / f'our_{metric}_cost_{tag}_4_{start}_{stop}.txt').write_text(
                         ''.join(f'{fn}:{cost + extra}\n'
@@ -124,9 +124,9 @@ def test_summary_ranges():
         assert '+20.0%' in report and '+0.0%' in report
 
         # Overlapping measurements may be combined only if they agree.
-        (route / 'our_t_cost_C_4_0_2.txt').write_text('1:0\n278:21\n')
+        (route / 'our_t_cost_F_4_0_2.txt').write_text('1:0\n278:21\n')
         try:
-            compare_no_m2.load_default_map(str(route / 'our_t_cost_C_4_*.txt'))
+            compare_no_m2.load_default_map(str(route / 'our_t_cost_F_4_*.txt'))
         except AssertionError as exc:
             assert 'conflicting default cost' in str(exc)
         else:

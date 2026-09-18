@@ -4,7 +4,7 @@ Decomposition-path probe (Q1 measurement): compare three "truth table → branch
 
   A. BDD + reorder(sifting) + fusion   —— current default backend (the main pipeline outside the algebra document);
   B. BDD (initial order only, no reorder) + fusion —— remove reorder;
-  C. ANF decomposition + fusion (pure algebra, no graph stage) —— ANF monomials are affine cubes, pool built directly for fusion.
+  F. ANF decomposition + fusion (pure algebra, no graph stage) —— ANF monomials are affine cubes, pool built directly for fusion.
 
 Metrics: post-fusion pool ΣT, per-case runtime, pool size. Samples come from data/test_cases/test_cases_{n}.
 Output: experiments/phase0_results/decomposition_probe_{n}.txt
@@ -71,11 +71,11 @@ def main():
         with open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')) as f:
             lines = f.readlines()
         cases = [int(l.rstrip('\n')) for l in rng.sample(lines, min(count, len(lines)))]
-        stats = {'A': [0, 0.0, 0], 'B': [0, 0.0, 0], 'C': [0, 0.0, 0]}  # [ΣT, Σtime, Σpool]
+        stats = {'A': [0, 0.0, 0], 'B': [0, 0.0, 0], 'F': [0, 0.0, 0]}  # [ΣT, Σtime, Σpool]
         out_lines = [f'# decomposition path probe n={n} cases={len(cases)}']
         for ci, tt in enumerate(cases):
             ttobj = TruthTable(tt, n)
-            for key in ('A', 'B', 'C'):
+            for key in ('A', 'B', 'F'):
                 t0 = time.perf_counter()
                 if key in ('A', 'B'):
                     entries, nn = bdd_pool(ttobj, reorder=(key == 'A'))
@@ -93,13 +93,13 @@ def main():
                 stats[key][1] += dt
                 stats[key][2] += len(entries)
             out_lines.append(f'{ci} {tt} A={stats["A"][0]}(p{stats["A"][2]}) '
-                             f'B={stats["B"][0]}(p{stats["B"][2]}) C={stats["C"][0]}(p{stats["C"][2]})')
+                             f'B={stats["B"][0]}(p{stats["B"][2]}) F={stats["F"][0]}(p{stats["F"][2]})')
         summary = [f'# n={n} summary:']
-        for key, name in (('A', 'BDD+reorder+fusion (current)'), ('B', 'BDD no-reorder+fusion'), ('C', 'ANF+fusion (pure algebra)')):
+        for key, name in (('A', 'BDD+reorder+fusion (current)'), ('B', 'BDD no-reorder+fusion'), ('F', 'ANF+fusion (pure algebra)')):
             summary.append(f'  {name}: ΣT {stats[key][0]}, time {stats[key][1]:.2f}s, '
                            f'avg initial pool size {stats[key][2]/len(cases):.0f}')
         summary.append(f'  B vs A: {1 - stats["B"][0]/max(1,stats["A"][0]):+.1%}；'
-                       f'C vs A: {1 - stats["C"][0]/max(1,stats["A"][0]):+.1%}')
+                       f'F vs A: {1 - stats["F"][0]/max(1,stats["A"][0]):+.1%}')
         print('\n'.join(summary))
         out = os.path.join(EXPERIMENTS, 'phase0_results', f'decomposition_probe_{n}.txt')
         with open(out, 'w') as f:

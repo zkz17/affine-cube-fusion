@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-n≥8 timing smoke test: per-case time breakdown for the production default backends (F / FP)
-plus the M2 margin; the C pool is measured as a side effect of the M2 enumeration upper bound
-(maximum number of segments). A/G are not measured (A is not the production default and BDD
-graph construction is slow at large n; G is a small-n strengthening option). Reads only
+n≥8 timing smoke test: per-case time breakdown for the production default backends (FS / FP)
+plus the M2 margin; the F pool is measured as a side effect of the M2 enumeration upper bound
+(maximum number of segments). A/FG are not measured (A is not the production default and BDD
+graph construction is slow at large n; FG is a small-n strengthening option). Reads only
 data/test_cases and writes only experiments/phase0_results/.
 
 Usage: ./venv/bin/python experiments/m2_n8n9_smoke.py <n> <cases>
@@ -46,11 +46,11 @@ def main():
     fp_on = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                     fprm_proxy=True, m2_post=True)
 
-    acc = dict(F_prep=0.0, F_off=0.0, F_on=0.0, F_T0=0, F_T1=0, F_CX0=0, F_CX1=0,
-               F_gain=0, F_m2wall=0.0,
+    acc = dict(FS_prep=0.0, FS_off=0.0, FS_on=0.0, FS_T0=0, FS_T1=0, FS_CX0=0, FS_CX1=0,
+               FS_gain=0, FS_m2wall=0.0,
                FP_prep=0.0, FP_off=0.0, FP_on=0.0, FP_T0=0, FP_T1=0, FP_CX0=0, FP_CX1=0,
                FP_gain=0, FP_m2wall=0.0,
-               C_off=0.0, C_on=0.0, C_gain=0, C_m2wall=0.0)
+               F_off=0.0, F_on=0.0, F_gain=0, F_m2wall=0.0)
     lines = [f'====== n = {n}({cases} cases), ms per case ======', '']
 
     for idx, fn in enumerate(data):
@@ -60,8 +60,8 @@ def main():
         t0 = time.perf_counter()
         _, cF = fprm_best(fn, n)
         tp = time.perf_counter() - t0
-        acc['F_prep'] += tp
-        row.append(f'  F  prep(fprm_best)      {fmt(tp)} ms')
+        acc['FS_prep'] += tp
+        row.append(f'  FS  prep(fprm_best)      {fmt(tp)} ms')
 
         g = shift_fn(fn, cF, n) if cF else fn
         kept, st = fuse_pool_global(anf_pool(g, n), n)
@@ -69,27 +69,27 @@ def main():
         t0 = time.perf_counter()
         k2, s2 = m2_interleaved(kept, st, n)
         mw = time.perf_counter() - t0
-        acc['F_m2wall'] += mw
-        acc['F_gain'] += base - pool_t_cost(k2, s2)
-        row.append(f'  F  M2 post-process      {fmt(mw)} ms(pool-T gain {base - pool_t_cost(k2, s2)})')
+        acc['FS_m2wall'] += mw
+        acc['FS_gain'] += base - pool_t_cost(k2, s2)
+        row.append(f'  FS  M2 post-process      {fmt(mw)} ms(pool-T gain {base - pool_t_cost(k2, s2)})')
 
         t0 = time.perf_counter()
         f_off.synthesize(tt)
         toff = time.perf_counter() - t0
-        acc['F_off'] += toff
+        acc['FS_off'] += toff
         t0f, cx0 = count_costs(to_qiskit(f_off.circ))
-        acc['F_T0'] += t0f
-        acc['F_CX0'] += cx0
+        acc['FS_T0'] += t0f
+        acc['FS_CX0'] += cx0
 
         t0 = time.perf_counter()
         f_on.synthesize(tt)
         ton = time.perf_counter() - t0
-        acc['F_on'] += ton
+        acc['FS_on'] += ton
         t1f, cx1 = count_costs(to_qiskit(f_on.circ))
-        acc['F_T1'] += t1f
-        acc['F_CX1'] += cx1
+        acc['FS_T1'] += t1f
+        acc['FS_CX1'] += cx1
         assert f_on.circ.verify(tt)
-        row.append(f'  F  whole case: off {fmt(toff)}  on {fmt(ton)} ms  '
+        row.append(f'  FS  whole case: off {fmt(toff)}  on {fmt(ton)} ms  '
                    f'(T {t0f}→{t1f}, CX {cx0}→{cx1})')
 
         t0 = time.perf_counter()
@@ -132,9 +132,9 @@ def main():
         t0 = time.perf_counter()
         k2, s2 = m2_interleaved(kept, st, n)
         mw = time.perf_counter() - t0
-        acc['C_m2wall'] += mw
-        acc['C_gain'] += base - pool_t_cost(k2, s2)
-        row.append(f'  C  M2 post-process      {fmt(mw)} ms(pool-T gain {base - pool_t_cost(k2, s2)},'
+        acc['F_m2wall'] += mw
+        acc['F_gain'] += base - pool_t_cost(k2, s2)
+        row.append(f'  F  M2 post-process      {fmt(mw)} ms(pool-T gain {base - pool_t_cost(k2, s2)},'
                    f'pool m={len(kept) + len(st)})')
 
         print('\n'.join(row), flush=True)
@@ -142,14 +142,14 @@ def main():
 
     c = len(data)
     msg = [f'--- n={n} averages (ms/case) ---',
-           f'F  : prep={fmt(acc["F_prep"]/c)}  whole off={fmt(acc["F_off"]/c)}  '
-           f'on={fmt(acc["F_on"]/c)}  M2={fmt(acc["F_m2wall"]/c)}  pool-T gain Σ={acc["F_gain"]}',
+           f'FS  : prep={fmt(acc["FS_prep"]/c)}  whole off={fmt(acc["FS_off"]/c)}  '
+           f'on={fmt(acc["FS_on"]/c)}  M2={fmt(acc["FS_m2wall"]/c)}  pool-T gain Σ={acc["FS_gain"]}',
            f'FP : prep={fmt(acc["FP_prep"]/c)}  whole off={fmt(acc["FP_off"]/c)}  '
            f'on={fmt(acc["FP_on"]/c)}  M2={fmt(acc["FP_m2wall"]/c)}  pool-T gain Σ={acc["FP_gain"]}',
-           f'C  : M2={fmt(acc["C_m2wall"]/c)}  pool-T gain Σ={acc["C_gain"]}',
-           f'ΣT: F {acc["F_T0"]}→{acc["F_T1"]}({(acc["F_T1"]/acc["F_T0"]-1):+.2%})  '
+           f'F  : M2={fmt(acc["F_m2wall"]/c)}  pool-T gain Σ={acc["F_gain"]}',
+           f'ΣT: FS {acc["FS_T0"]}→{acc["FS_T1"]}({(acc["FS_T1"]/acc["FS_T0"]-1):+.2%})  '
            f'FP {acc["FP_T0"]}→{acc["FP_T1"]}({(acc["FP_T1"]/acc["FP_T0"]-1):+.2%})',
-           f'ΣCX: F {acc["F_CX0"]}→{acc["F_CX1"]}({(acc["F_CX1"]/acc["F_CX0"]-1):+.2%})  '
+           f'ΣCX: FS {acc["FS_CX0"]}→{acc["FS_CX1"]}({(acc["FS_CX1"]/acc["FS_CX0"]-1):+.2%})  '
            f'FP {acc["FP_CX0"]}→{acc["FP_CX1"]}({(acc["FP_CX1"]/acc["FP_CX0"]-1):+.2%})']
     print('\n'.join(msg), flush=True)
     lines += msg + ['']

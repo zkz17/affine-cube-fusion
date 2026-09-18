@@ -9,9 +9,9 @@ pool states (single-step branch moves) instead of a greedy maximal matching in o
 
 Comparison setup:
   pool A = BDD graph-phase product (_bdd_entries, with root mask);
-  pool F = ANF pool of the FPRM-optimal shift (before fusion).
+  pool FS = ANF pool of the FPRM-optimal shift (before fusion).
   variants: greedy (production fuse_pool_global), beam1/beam4/beam16 (single-step-move beam);
-  pool F additionally gets GL search cost (measuring beam's recovery rate vs full-coordinate refactorization).
+  pool FS additionally gets GL search cost (measuring beam's recovery rate vs full-coordinate refactorization).
 
 Implemented as a probe script; production code untouched. State dedup key = (ΣT, set of (cb, r) in pool).
 """

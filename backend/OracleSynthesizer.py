@@ -19,7 +19,7 @@ from config import config
 
 class OracleSynthesizer:
     def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False,
-                 fprm_proxy=False, paths=('F',), m2_post=True):
+                 fprm_proxy=False, paths=('FS',), m2_post=True):
         self.limbdd = None
         self.limbdd_mgr = LimBDDManager()
         self.qubit_mgr = QubitManager()
@@ -32,30 +32,30 @@ class OracleSynthesizer:
         self.fused_backend = fused_backend
         # G-2.2 optional switch (off by default): deterministic GL(n,2) local search, time for quality
         # (about +6s/case at n=7, 94% of which is the fusion engine itself -- see docs/architecture.md G-2.2).
-        # Exploration-phase discipline: G is an **independent option** (it does not implicitly carry A);
+        # Exploration-phase discipline: FG is an **independent option** (it does not implicitly carry A);
         # a min over path combinations only happens among the explicitly selected paths, never hidden.
         self.gl_search = gl_search
-        # Plan A optional switch (off by default): the fusion-free proxy prescreen **replaces** the F path
+        # Plan A optional switch (off by default): the fusion-free proxy prescreen **replaces** the FS path
         # (a choice relation, not a min; intended to upgrade the current shift climb2 for n≥9, 12~28%
         # worse quality for n≤8)
         self.fprm_proxy = fprm_proxy
         # Path selection (exploration-phase discipline): **single-path only** -- paths is a
-        # single character 'A'/'C'/'F' (or a 1-tuple thereof); multi-path combinations (explicit min) are
+        # single route name 'A'/'F'/'FS' (or a 1-tuple thereof); multi-path combinations (explicit min) are
         # disabled and untested at this stage.
-        # Actual test paths = A / C / F / FP (proxy switch) / G (gl switch).
-        # With gl_search=True the G option runs alone, ignoring paths.
+        # Actual test paths = A / F / FS / FP (proxy switch) / FG (gl switch).
+        # With gl_search=True the FG option runs alone, ignoring paths.
         if isinstance(paths, (tuple, list)):
-            assert len(paths) == 1 and paths[0] in ('A', 'C', 'F'),                 f'illegal paths (only single-path A/C/F allowed at this stage): {paths}'
+            assert len(paths) == 1 and paths[0] in ('A', 'F', 'FS'),                 f'illegal paths (only single-path A/F/FS allowed at this stage): {paths}'
             self.paths = tuple(paths)
         else:
-            assert paths in ('A', 'C', 'F'), f'illegal paths (only single-path A/C/F allowed at this stage): {paths}'
+            assert paths in ('A', 'F', 'FS'), f'illegal paths (only single-path A/F/FS allowed at this stage): {paths}'
             self.paths = (paths,)
         # Macro M2 interleaved post-processing switch (integrated after P9; **default on**): at the winning pool's fusion fixed point apply the strictly-decreasing macro
         # {A,B,C}→{B⊕h,(A⊕h)⊕C} (docs/macro_m2_theory.md); per-case T never regresses, zero CX-worse
-        # cases over the full n≤7 measurements, 0~2.3ms/case (negligible against F's 2^n shift full
+        # cases over the full n≤7 measurements, 0~2.3ms/case (negligible against FS's 2^n shift full
         # enumeration / FP's proxy prescreen).
-        # Note: with it on, the G≤F zero-regression chain becomes empirical (M2 opportunities on G pools
-        # are usually 0 and occasionally present on F -- G is a slow enhancement option rather than the
+        # Note: with it on, the FG≤FS zero-regression chain becomes empirical (M2 opportunities on FG pools
+        # are usually 0 and occasionally present on FS -- FG is a slow enhancement option rather than the
         # production default, so that chain is not a constraint; the structural comparison is kept in
         # tests/test_gl_search.py's explicit m2_post=False setting).
         self.m2_post = m2_post
@@ -173,23 +173,21 @@ class OracleSynthesizer:
         """
         Phase 5+: global fusion backend (default no-ancilla path).
 
-        Path selection (exploration-phase discipline): the production backend runs only the
-        F path for now (paths defaults to ('F',)); paths may be any subset of {'A','C','F'}, computing
-        only the selected paths and taking the best of them.
+        Path selection: paths selects exactly one of A/F/FS, defaulting to ('FS',).
           A. BDD path: graph phase (try_neg / split_neg / reorder / splitting, absorb removed)
              → branch pool → global fusion;
-          C. ANF path: truth table → Möbius → monomial pool (c=0);
-          F. FPRM path (G-2.1): search for the optimal c over the shift subgroup (n≤8 full 2^n
+          F. ANF path: truth table → Möbius → monomial pool (c=0);
+          FS. FPRM path (G-2.1): search for the optimal c over the shift subgroup (n≤8 full 2^n
              enumeration; n≥9 deterministic two-start climb2); circuit = X(c) sandwich (T-free).
-        With fprm_proxy=True, F is replaced by the fusion-free proxy prescreen version (choice relation,
-        not min). Ties are prioritized by the given order in paths (default F only, no tie issue).
+        With fprm_proxy=True, FS is replaced by the fusion-free proxy prescreen version (choice relation,
+        not min). Ties are prioritized by the given order in paths (default FS only, no tie issue).
 
-        Optional (gl_search=True, G-2.2): ignore paths and run the **G option** alone -- deterministic
-        GL(n,2) local search (candidates include the FPRM-optimal cF, so G ≤ F, zero regression
-        relative to F; zero wrapper preferred on T ties). Exploration-phase discipline: G is an
-        independent option, no implicit min(A,G). Cost: about +6s/case at n=7.
+        Optional (gl_search=True, G-2.2): ignore paths and run the **FG option** alone -- deterministic
+        GL(n,2) local search (candidates include the FPRM-optimal cF, so FG ≤ FS, zero regression
+        relative to FS; zero wrapper preferred on T ties). Exploration-phase discipline: FG is an
+        independent option, no implicit min(A,FG). Cost: about +6s/case at n=7.
 
-        Note: the C' path (ANF one-variable-apart pre-merge, 1.2/T-3) was measured and
+        Note: the F' path (ANF one-variable-apart pre-merge, 1.2/T-3) was measured and
         **turned off for now** (end-to-end gain −0.22%~−0.53% ΣT, cost +23%~36% wall, sitting in the
         decision-critical zone); `BranchFusion.anf_pool_premerged` and `tests/test_premerge.py` are
         kept and can be re-enabled at any time.
@@ -201,16 +199,16 @@ class OracleSynthesizer:
         structural comparisons).
 
         Emission: grouped by root mask (one X(r) … X(r) sandwich per r), fused segments (r=0) emitted
-        independently; an overall X(c) sandwich when F/FP wins; CNOT(A⁻¹)/CNOT(A) linear sandwich when
-        G wins; simplify_terms at the end.
+        independently; an overall X(c) sandwich when FS/FP wins; CNOT(A⁻¹)/CNOT(A) linear sandwich when
+        FG wins; simplify_terms at the end.
         """
         n = tt.num_var
 
         if self.gl_search:
-            # ---- option G: deterministic GL(n,2) local search (independent option, no implicit min) ----
-            # Exploration-phase discipline: any "multi-path min" must be an explicit option; G is a
-            # standalone item and no longer implicitly carries A. (G's internal candidates include cF,
-            # so G ≤ F, zero regression relative to F is preserved.)
+            # ---- option FG: deterministic GL(n,2) local search (independent option, no implicit min) ----
+            # Exploration-phase discipline: any "multi-path min" must be an explicit option; FG is a
+            # standalone item and no longer implicitly carries A. (FG's internal candidates include cF,
+            # so FG ≤ FS, zero regression relative to FS is preserved.)
             kept, standalone, shift_c, cnots = gl_search(tt.bitstr, n)
             if self.m2_post:
                 kept, standalone = m2_interleaved(kept, standalone, n)
@@ -221,14 +219,14 @@ class OracleSynthesizer:
                 if self.m2_post:
                     kept_a, standalone_a = m2_interleaved(kept_a, standalone_a, n)
                 candidates.append((pool_t_cost(kept_a, standalone_a), kept_a, standalone_a, 0, ()))
-            if 'C' in self.paths:
+            if 'F' in self.paths:
                 entries_c = anf_pool(tt.bitstr, n)
                 kept_c, standalone_c = fuse_pool_global(entries_c, n)
                 if self.m2_post:
                     kept_c, standalone_c = m2_interleaved(kept_c, standalone_c, n)
                 candidates.append((pool_t_cost(kept_c, standalone_c), kept_c, standalone_c, 0, ()))
-            if 'F' in self.paths:
-                # With Plan A (fprm_proxy=True) the proxy prescreen version **replaces** the default F (choice relation, not min)
+            if 'FS' in self.paths:
+                # With Plan A (fprm_proxy=True) the proxy prescreen version **replaces** the default FS (choice relation, not min)
                 if self.fprm_proxy:
                     kept_f, standalone_f, shift_c = fprm_proxy_best(tt.bitstr, n)
                 else:
@@ -251,7 +249,7 @@ class OracleSynthesizer:
         reorder=False skips the B-4 segment reordering; it is used by the raw MT0/PK0
         baselines, whose pools may contain thousands of blocks and for which the O(m²)
         reordering pass would dominate the runtime (T is unaffected either way). The raw
-        ANF baseline C0 follows the same emission policy for a consistent comparison.
+        ANF baseline F0 follows the same emission policy for a consistent comparison.
         """
         # ---- emission: shift sandwich X(c) (no-op when shift_c=0) ----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
@@ -292,25 +290,25 @@ class OracleSynthesizer:
 
     def process_cover_route(self, tt, route):
         """
-        Experimental starting-cover routes (branch exp/starting-cover-routes):
+        Starting-cover routes:
 
           MT  : all-minterm pool (one dim-0 block per assignment in supp(f));
           PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites);
           PKS : PK cover with shift search (full enumeration n≤8, climb2 n≥9);
           PKP : PK cover with proxy-prescreened shift search (top-8 + c=0);
-          C0  : raw ANF pool emitted **without** the fusion engine (baseline);
+          F0  : raw ANF pool emitted **without** the fusion engine (baseline);
           MT0 : raw MT pool emitted **without** the fusion engine (baseline);
           PK0 : raw PK pool emitted **without** the fusion engine (baseline).
 
-        MT/PK/C0/MT0/PK0 skip the transformation search entirely (T = identity); PKS/PKP
+        MT/PK/F0/MT0/PK0 skip the transformation search entirely (T = identity); PKS/PKP
         wrap the emission in the X(c) sandwich. Macro M2 interleaving follows the
-        regular `m2_post` switch for the engine routes; the raw baselines C0/MT0/PK0 skip
+        regular `m2_post` switch for the engine routes; the raw baselines F0/MT0/PK0 skip
         both the engine and the macro (there is no fixed point to apply it to) and are
         emitted in generator order without the B-4 reordering pass.
         """
         n = tt.num_var
-        assert route in ('MT', 'PK', 'PKS', 'PKP', 'C0', 'MT0', 'PK0'), f'illegal cover route: {route}'
-        raw_generators = {'C0': anf_pool, 'MT0': minterm_entries, 'PK0': pk_entries}
+        assert route in ('MT', 'PK', 'PKS', 'PKP', 'F0', 'MT0', 'PK0'), f'illegal cover route: {route}'
+        raw_generators = {'F0': anf_pool, 'MT0': minterm_entries, 'PK0': pk_entries}
         if route in raw_generators:
             entries = raw_generators[route](tt.bitstr, n)
             self._emit_pool([], [cb for cb, _, _ in entries], 0, (), reorder=False)

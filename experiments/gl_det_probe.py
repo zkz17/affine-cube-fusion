@@ -63,7 +63,7 @@ def run_variant(fn, n, strategy, max_steps):
     cache2 = {}
     cost2 = G.make_cost(fn_pre, n, cache2)
 
-    best_v, best_cnots = vF, []          # cF itself is always a candidate (the guarantee of the dominance chain G ≤ F)
+    best_v, best_cnots = vF, []          # cF itself is always a candidate (the guarantee of the dominance chain FG ≤ FS)
 
     def consider(A, cnots, v):
         nonlocal best_v, best_cnots

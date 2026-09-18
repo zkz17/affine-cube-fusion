@@ -7,11 +7,11 @@ Applying the shift x ↦ x⊕c to f: the circuit implementation of c is an X(c) 
 c=0 is the current ANF path ⇒ the min combination is structurally a zero regression.
 
 Metrics:
-  base     = min(A_BDD, C_{c=0})                  -- current production backend
-  improved = min(A_BDD, C pool best over c)       -- FPRM search backend
-  Also record the t(deg f) lower bound (G-3) and the C-path time per c (which decides the full-enumeration/sampling budget).
+  base     = min(A_BDD, F_{c=0})                  -- current production backend
+  improved = min(A_BDD, F pool best over c)       -- FPRM search backend
+  Also record the t(deg f) lower bound (G-3) and the F-path time per c (which decides the full-enumeration/sampling budget).
 
-Setup: reuse OracleSynthesizer._bdd_entries (A pool) and anf_pool + fuse_pool_global (C pool);
+Setup: reuse OracleSynthesizer._bdd_entries (A pool) and anf_pool + fuse_pool_global (F pool);
 the XOR invariant is fully checked for n≤7 (function space after shifting).
 
 Output: experiments/phase0_results/fprm_probe.txt
@@ -116,12 +116,12 @@ def main():
         per_c_ms = wall_c / (cases * len(shifts)) * 1000
         msg = [
             f'====== n = {n} ======',
-            f'cases={cases} shifts={len(shifts)}/2^{n}  C-path total time {wall_c:.1f}s(mean per c {per_c_ms:.1f} ms)',
+            f'cases={cases} shifts={len(shifts)}/2^{n}  F-path total time {wall_c:.1f}s(mean per c {per_c_ms:.1f} ms)',
             f'ΣT: base={s_base} improved={s_imp}  Δ {s_imp - s_base:+d}({(s_base - s_imp) / max(s_base, 1):.2%})',
             f'cases: better={stat["better"]} same={stat["same"]}',
             f'G-3 lower bound Σ t(deg f)={s_lb}: {s_lb / max(s_base, 1):.2%} of base;'
             f'headroom base→bound {(s_base - s_lb) / max(s_base, 1):.2%}, improved→bound {(s_imp - s_lb) / max(s_imp, 1):.2%}',
-            f'estimated C-path time for full 2^{n} shifts: {per_c_ms * (1 << n) / 1000:.1f}s/case',
+            f'estimated F-path time for full 2^{n} shifts: {per_c_ms * (1 << n) / 1000:.1f}s/case',
         ]
         print('\n'.join(msg), flush=True)
         lines += msg + ['']

@@ -113,7 +113,7 @@ def test_flag_fallback(num_vars=5, rounds=20):
 def test_input_allocation_regression():
     """Regression: when the fused backend skipped construct, input qubits used to be lazily missing.
 
-    Example fn=64560 (n=4): the F path has cF=0 and the first segment only uses qubits 1/2/3,
+    Example fn=64560 (n=4): the FS path has cF=0 and the first segment only uses qubits 1/2/3,
     qubit 0 is never allocated, compute_tt enumerates in a 3-variable space, and the emitted
     circuit's tt is misaligned (outputs 0). synthesize now explicitly allocates all input qubits
     at the fused-path entry.
@@ -121,8 +121,8 @@ def test_input_allocation_regression():
     print('Testing fused backend input allocation regression...')
 
     tt = TruthTable(64560, 4)
-    for cfg in ((False, False, ('F',)), (False, False, ('A',)),
-                (False, False, ('C',)), (False, True, ('F',)), (True, False, ('F',))):
+    for cfg in ((False, False, ('FS',)), (False, False, ('A',)),
+                (False, False, ('F',)), (False, True, ('FS',)), (True, False, ('FS',))):
         gl, proxy, paths = cfg
         s = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True,
                                     gl_search=gl, fprm_proxy=proxy, paths=paths)

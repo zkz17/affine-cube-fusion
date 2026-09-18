@@ -16,7 +16,7 @@ data/
   sshr_cost/         sshr_{t,cx}_cost_{n}: SSHR baseline T/CX cost per case (filled n=3..6;
                      the n=7..10 files are empty), sshr_time_{n} (n=3..6)
   our_cost/
-    {path}/          one folder per base route: A C C0 F FP G MT MT0 PK PK0 PKP PKS.
+    {path}/          one folder per base route: A F F0 FS FP FG MT MT0 PK PK0 PKP PKS.
                      Each folder holds the default (m2=1) and `_noM2` (m2=0) runs:
                      our_t_cost_{tag}_{n}_{start}_{stop}.txt   (per-case T cost)
                      our_cx_cost_{tag}_{n}_{start}_{stop}.txt  (per-case CX cost)
@@ -34,11 +34,11 @@ data/
 
 - `path` (the evaluate.py argument) is the base route and folder name; it is one of:
   - `A`    BDD path
-  - `C`    ANF path
-  - `C0`   raw ANF cover, fusion engine off
-  - `F`    FPRM path with shift search (the production default)
+  - `F`    ANF path
+  - `F0`   raw ANF cover, fusion engine off
+  - `FS`    FPRM path with shift search (the production default)
   - `FP`   FPRM path with the proxy prescreen
-  - `G`    GL(n,2) local search
+  - `FG`    GL(n,2) local search
   - `MT`   minterm-cover start + fusion engine
   - `MT0`  minterm-cover raw emission, fusion engine off
   - `PK`   pseudo-Kronecker cover + fusion engine
@@ -50,7 +50,7 @@ data/
 - Default runs are produced with the macro-M2 post-processing **on** (`m2=1`, plain tag);
   comparison runs with it **off** (`m2=0`) carry the `_noM2` tag suffix and live in the
   same per-path folder.
-- `C0`, `MT0`, and `PK0` ignore `m2`, always use their plain tag, and skip fusion,
+- `F0`, `MT0`, and `PK0` ignore `m2`, always use their plain tag, and skip fusion,
   macro moves, and segment reordering. All three use the same raw emission policy.
 - Evaluation uses zero ancillas and verifies every circuit against its truth table.
   Verification and Qiskit conversion are excluded from `avg synthesize wall`.
@@ -58,34 +58,60 @@ data/
   fly in the `our_results` report. The old per-n files in `deg_bound/` are historical only.
 - `reorder` (default 1) affects only the A/BDD path.
 
+## Route-name migration (2026-09-18)
+
+The code, result directories, filenames, report labels, and manuscript now use:
+
+- former `C0` -> `F0`: raw ANF;
+- former `C` -> `F`: ANF + fusion, without shift search;
+- former `F` -> `FS`: ANF + shift search + fusion (the production default);
+- former `G` -> `FG`: ANF + shift search + local linear search + fusion.
+
+`A`, `FP`, `MT`, `MT0`, `PK`, `PK0`, `PKS`, and `PKP` retain their names.
+The `_noM2` suffix is unchanged: for example, former `F_noM2` is now `FS_noM2`,
+stored in `our_cost/FS/`. The paper may abbreviate this configuration as `FS-`.
+Numeric costs, case ordering, and recorded runtimes are preserved; this migration
+does not represent a new measurement or an algorithm change.
+
+Old route names are not accepted as aliases. In particular, `F` now means unshifted
+ANF, so old commands using `F` for shift search must be changed to `FS`. In the
+Python API, use `paths=('F',)` for unshifted ANF and `paths=('FS',)` for shift search;
+the existing `fprm_proxy` and `gl_search` switches still select FP and FG.
+
+Git history and archived exploratory notes/logs may retain the former names.
+The retained local paired-M2 timing report is relabeled FS, with a naming note;
+its original source hash and timestamps still identify the code used for that run,
+and its numeric run log is unchanged. Development-stage identifiers such as `G-2.1`,
+`G-2.2`, and `G-3` are historical task identifiers, not route names.
+
 ## Coverage
 
-| n | test_cases | classic runs (A / C / F / FP / G) | cover runs (C0 / MT / MT0 / PK / PK0 / PKP / PKS) | `_noM2` runs (A / C / F / FP) | Exorcism | SSHR |
+| n | test_cases | classic runs (A / F / FS / FP / FG) | cover runs (F0 / MT / MT0 / PK / PK0 / PKP / PKS) | `_noM2` runs (A / F / FS / FP) | Exorcism | SSHR |
 |---|---|---|---|---|---|---|
 | 3 | 256 (exhaustive) | 256 (all) | — | — | 256 | 256 |
 | 4 | 65536 (exhaustive) | 65536 (all) | — | 1000 | 65536 | 65536 |
 | 5 | 10000 | 10000 (all) | 1000 | 1000 | 10000 | 10000 |
 | 6 | 10000 | 10000 (all) | 1000 | 1000 | 10000 | 10000 |
 | 7 | 10000 | 10000 (all) | 1000 | 1000 | 10000 | — (file empty) |
-| 8 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 10000 | — (file empty) |
-| 9 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 10000 | — (file empty) |
-| 10 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 10000 | — (file empty) |
-| 11 | 10000 | 1000 (A/C/F/FP) | 1000 | 1000 | 1000 | — (no files) |
+| 8 | 10000 | 1000 (A/F/FS/FP) | 1000 | 1000 | 10000 | — (file empty) |
+| 9 | 10000 | 1000 (A/F/FS/FP) | 1000 | 1000 | 10000 | — (file empty) |
+| 10 | 10000 | 1000 (A/F/FS/FP) | 1000 | 1000 | 10000 | — (file empty) |
+| 11 | 10000 | 1000 (A/F/FS/FP) | 1000 | 1000 | 1000 | — (no files) |
 
-G runs exist for n=3..7 only; all other routes stop at n=11. FP also has a historical
+FG runs exist for n=3..7 only; all other routes stop at n=11. FP also has a historical
 n=7 summary for the first 1000 cases, but its saved per-case costs cover 10000 cases.
 
 ## Reproducing a run
 
 ```bash
 python evaluate.py <n> <start> <stop> <path> [m2] [reorder]
-#  path is one of A C C0 F FP G MT MT0 PK PK0 PKP PKS; m2=0 produces the _noM2 comparison runs
+#  path is one of A F F0 FS FP FG MT MT0 PK PK0 PKP PKS; m2=0 produces the _noM2 comparison runs
 #  (default m2=1); reorder (default 1) only affects path A
 ```
 
-Raw ANF results use `data/our_cost/C0/our_{t,cx}_cost_C0_{n}_0_1000.txt` for
+Raw ANF results use `data/our_cost/F0/our_{t,cx}_cost_F0_{n}_0_1000.txt` for
 `n=5..11`, matching the starting-cover comparison subsets. Reproduce one group with
-`python evaluate.py 8 0 1000 C0`. These C0 measurements were collected on 2026-09-17
+`python evaluate.py 8 0 1000 F0`. These F0 measurements were collected on 2026-09-17
 with an AMD Ryzen 9 7945HX, WSL2 Linux 6.6.87.2, Python 3.12.3, NumPy 2.5.2,
 Qiskit 2.5.2, and SciPy 1.18.0. Groups ran sequentially; the reported time includes
 synthesis only, excluding circuit verification, Qiskit conversion, and file I/O.

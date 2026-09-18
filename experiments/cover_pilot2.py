@@ -2,7 +2,7 @@
 """
 Pilot run for the PKS/PKP cover routes (branch exp/starting-cover-routes).
 
-Measures T / CX / wall per configuration (PK, PKS, PKP with M2 on; F and FP as
+Measures T / CX / wall per configuration (PK, PKS, PKP with M2 on; FS and FP as
 references) and the degree bound, plus a small MT translation-variance diagnostic
 (16 fixed shifts per case at n=7/8) to justify skipping shift search on minterm pools.
 
@@ -40,10 +40,10 @@ def run_one(fn, n, route, m2=True):
 
 
 def main():
-    lines = ['PKS/PKP pilot (T / CX / wall; PK, F, FP references; MT shift-variance diagnostic)', '']
+    lines = ['PKS/PKP pilot (T / CX / wall; PK, FS, FP references; MT shift-variance diagnostic)', '']
     for n, cases in PROFILE.items():
         fns = [int(l) for l in open(os.path.join(ROOT, f'data/test_cases/test_cases_{n}')).readlines()[:cases]]
-        acc = {r: [0, 0, 0.0] for r in ('PK', 'PKS', 'PKP', 'F', 'FP')}
+        acc = {r: [0, 0, 0.0] for r in ('PK', 'PKS', 'PKP', 'FS', 'FP')}
         bound_sum = 0
         for fn in fns:
             bound_sum += config['t_cost'](anf_degree(fn, n))
@@ -52,7 +52,7 @@ def main():
                 acc[r][0] += t
                 acc[r][1] += cx
                 acc[r][2] += w
-            for r, kwargs in (('F', {}), ('FP', dict(fprm_proxy=True))):
+            for r, kwargs in (('FS', {}), ('FP', dict(fprm_proxy=True))):
                 s = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True, **kwargs)
                 t0 = time.perf_counter()
                 s.synthesize(TruthTable(fn, n))
@@ -62,7 +62,7 @@ def main():
                 acc[r][1] += cx
         msg = [f'====== n = {n}({cases} cases)======']
         msg.append(f'{"config":<8}{"ΣT":>10}{"ΣCX":>10}{"wall(ms/例)":>14}')
-        for r in ('PK', 'PKS', 'PKP', 'F', 'FP'):
+        for r in ('PK', 'PKS', 'PKP', 'FS', 'FP'):
             msg.append(f'{r:<8}{acc[r][0]:>10}{acc[r][1]:>10}{acc[r][2]/cases*1e3:>13.1f}')
         msg.append(f'{"bound":<8}{bound_sum:>10}')
         print('\n'.join(msg), flush=True)

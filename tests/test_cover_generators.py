@@ -101,7 +101,7 @@ def test_pk_shift_routes(num_vars=4, rounds=40, verbose=False):
 
 
 def test_raw_anf_emission(verbose=False):
-    """C0 implements f exactly and charges each ANF monomial by its literal count.
+    """F0 implements f exactly and charges each ANF monomial by its literal count.
 
     Compute coefficients independently by the subset-parity definition, rather than
     reusing the fast transform or the pool whose costs we are checking.
@@ -127,10 +127,10 @@ def test_raw_anf_emission(verbose=False):
                 s = OracleSynthesizer(ancilla_num=0, m2_post=m2)
                 s.allocate_input_qubit(n)
                 tt = TruthTable(fn, n)
-                s.process_cover_route(tt, 'C0')
-                assert s.circ.verify(tt), f'C0 semantics: n={n}, tt={fn}'
+                s.process_cover_route(tt, 'F0')
+                assert s.circ.verify(tt), f'F0 semantics: n={n}, tt={fn}'
                 assert count_costs(to_qiskit(s.circ)) == tuple(expected), (n, fn, expected)
-                assert not s.qubit_mgr.anc, 'C0 allocated an ancilla'
+                assert not s.qubit_mgr.anc, 'F0 allocated an ancilla'
     print('Raw ANF emission test passed!!!')
 
 

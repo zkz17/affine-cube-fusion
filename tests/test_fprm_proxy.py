@@ -3,11 +3,11 @@
 Plan A (fprm_proxy) tests: invariants of the proxy-prescreening path (n ≤ 7).
 
 Invariants:
-  1. zero regression vs C: the candidate set always contains c=0 ⇒ proxy result ΣT ≤ C-path ΣT;
+  1. zero regression vs F: the candidate set always contains c=0 ⇒ proxy result ΣT ≤ F-path ΣT;
   2. XOR invariant: the winning pool's XOR = f(x⊕c), which after shifting back by c equals f;
   3. determinism: the same input gives identical results across two runs;
   4. end-to-end: synthesis with fprm_proxy=True verified case by case via compute_tt.
-(Exploration-phase discipline: fprm_proxy is a **choice relationship**, not a min with default F, so no comparison assertion against F is made;
+(Exploration-phase discipline: fprm_proxy is a **choice relationship**, not a min with default FS, so no comparison assertion against FS is made;
   for the quality gap see the P1 probe: top-8 retention 71.7%~84.6%.)
 """
 from random import randint
@@ -23,7 +23,7 @@ def random_tt(num_vars):
 
 
 def test_proxy_entries(num_vars=5, rounds=100, verbose=False):
-    """Zero regression (vs C) and XOR invariant of the proxy candidates."""
+    """Zero regression (vs F) and XOR invariant of the proxy candidates."""
     print(f'Testing fprm_proxy entries with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
@@ -40,7 +40,7 @@ def test_proxy_entries(num_vars=5, rounds=100, verbose=False):
         assert shift_fn(x, c_f, n) == tt.bitstr, f'XOR invariant broken: tt={tt.bitstr} c={c_f}'
 
         kept_0, st_0 = fuse_pool_global(anf_pool(tt.bitstr, n), n)
-        assert pool_t_cost(kept_f, st_f) <= pool_t_cost(kept_0, st_0), 'proxy worse than C path (c=0)'
+        assert pool_t_cost(kept_f, st_f) <= pool_t_cost(kept_0, st_0), 'proxy worse than F path (c=0)'
     print('fprm_proxy entries test passed!!!')
 
 

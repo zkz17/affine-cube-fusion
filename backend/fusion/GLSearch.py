@@ -8,7 +8,7 @@ Design (finalized by gl_det_probe measurements, de-randomized):
     totaling 2 + n(n−1) starts, **fully deterministic**;
   - climbing: steepest ascent in the CNOT neighborhood, strict improvement, step cap max_steps;
   - candidates include cF itself (zero wrapper); on T ties the zero wrapper is preferred, so the result
-    ≤ FPRM optimum (dominance chain G ≤ F ≤ C preserved) and CX is not overpaid due to ties.
+    ≤ FPRM optimum (dominance chain FG ≤ FS ≤ F preserved) and CX is not overpaid due to ties.
 
 Cost composition (measured at n=7): ~2400 evaluations × 2.55ms, of which **94% is fuse_pool_global**
 (every coordinate change requires a fresh Möbius + fusion, no reuse) -- this is why the switch is off
