@@ -2,7 +2,7 @@
 """
 P2 probe (Plan B entry gate): redemption rate of fixed-point pair rotation vs GL search.
 
-Theorem B (docs/fprm_proxy_and_pair_rotation.md §2.1): for a fusible pair (A,B) (d=A⊕B ≠ 0),
+Pair-rotation identity: for a fusible pair (A,B) (d=A⊕B ≠ 0),
 for any w ∈ K_d, {A,B} → {A∘τ_w, B∘τ_w} preserves the pool XOR and each segment's T exactly,
 while changing the coset position relative to third-party segments (the fusion relation truly changes).
 

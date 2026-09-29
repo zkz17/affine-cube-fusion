@@ -1,0 +1,21 @@
+Exorcism full matched-batch timings for Results Section 5.5
+started UTC: 2026-09-26T09:08:53.481066+00:00
+platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39; Python: 3.12.3
+CPU: AMD Ryzen 9 7945HX; same local WSL2 environment as ACF evaluations
+protocol: unmodified data/exorcism_cost.py n 0 1000, n=8,9,10, sequential subprocesses
+each function evaluated once for T cost and once for CNOT cost, with separate mean runtimes
+means include the corresponding binding call; truth-table conversion and file I/O are outside its timer
+no sampling, repetitions, explicit GC, warm-up exclusion, or concurrent evaluation workers
+existing full-size baseline files and their original timing summaries are preserved
+exorcism_cost.py SHA256: 42e6d7cc46c9e03aea9de53b51b21be83450c1eb9ebaa1ad7f6d4f49877fe1f1
+caterpillar_bindings.cpython-312-x86_64-linux-gnu.so SHA256: 6e17966b61d7263cfc8de530af4e83072b9b8d69bff86a5a955e493821de6586
+input n=8 SHA256: 3f9e560c2d83098b0eb4f3d5c8a5abcf142f16d9dc68dc6cd25d563d30d9bec7
+input n=9 SHA256: 805c35fa883e078918a429e98e5cac1f502d3986c677f0bf94bc997edce421ca
+input n=10 SHA256: d7cd3242f3a98a61206bf5f79a97f9ce9af90b7dd5e372eb5b2b4bba5f810414
+status: COMPLETE; three full matched batches; 6000 cost evaluations
+updated UTC: 2026-09-26T09:18:10.076663+00:00
+
+n cases mean_T_ms mean_CNOT_ms matching_T_records matching_CNOT_records
+8 1000 14.95057169 14.821131055 1000 1000
+9 1000 56.430394544 58.025782059 1000 1000
+10 1000 205.006622766 206.220447878 1000 1000

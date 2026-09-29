@@ -1,0 +1,5 @@
+# Optional figure-generation dependencies (Python 3.12, NumPy 2.5.2).
+# Install in the activated environment: python -m pip install -r requirements-plot.txt
+matplotlib==3.11.2
+pandas==3.0.6
+brokenaxes==0.6.2

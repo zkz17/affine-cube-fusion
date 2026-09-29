@@ -18,7 +18,7 @@ from utils.to_qiskit import to_qiskit
 from config import config
 
 class OracleSynthesizer:
-    def __init__(self, reorder=True, ancilla_num=1, fused_backend=True, gl_search=False,
+    def __init__(self, reorder=True, ancilla_num=0, fused_backend=True, gl_search=False,
                  fprm_proxy=False, paths=('FS',), m2_post=True):
         self.limbdd = None
         self.limbdd_mgr = LimBDDManager()
@@ -51,9 +51,8 @@ class OracleSynthesizer:
             assert paths in ('A', 'F', 'FS'), f'illegal paths (only single-path A/F/FS allowed at this stage): {paths}'
             self.paths = (paths,)
         # Macro M2 interleaved post-processing switch (integrated after P9; **default on**): at the winning pool's fusion fixed point apply the strictly-decreasing macro
-        # {A,B,C}→{B⊕h,(A⊕h)⊕C} (docs/macro_m2_theory.md); per-case T never regresses, zero CX-worse
-        # cases over the full n≤7 measurements, 0~2.3ms/case (negligible against FS's 2^n shift full
-        # enumeration / FP's proxy prescreen).
+        # {A,B,C}→{B⊕h,(A⊕h)⊕C} (docs/architecture.md, Fusion engine highlights).
+        # Accepted moves strictly lower T; CX is not part of the acceptance condition.
         # Note: with it on, the FG≤FS zero-regression chain becomes empirical (M2 opportunities on FG pools
         # are usually 0 and occasionally present on FS -- FG is a slow enhancement option rather than the
         # production default, so that chain is not a constraint; the structural comparison is kept in
@@ -117,7 +116,7 @@ class OracleSynthesizer:
     def _collect_pieces_fused(self, path=None):
         """
         Graph phase of the Phase-5 fusion path (line-for-line isomorphic to the old process()'s graph
-        phase): try_neg / split_neg / reorder / slice-and-absorb timing, returning the non-zero
+        phase): try_neg / split_neg / reorder / splitting, returning the non-zero
         subgraphs in processing order. No circuits are generated; shared by process_fused_global and
         the residual-measurement scripts.
         """
@@ -129,7 +128,7 @@ class OracleSynthesizer:
             self.variable_reorder()
             if path: self.show(mgr.limbdd, path + '_reorder')
 
-        pieces = []  # processing order (subgraphs still non-zero after absorption/splitting)
+        pieces = []  # processing order (subgraphs still non-zero after splitting)
         for limbdd_list in mgr.limbdd_list.values():
             for limbdd in limbdd_list:
                 if limbdd.root.weight:
@@ -194,9 +193,8 @@ class OracleSynthesizer:
 
         Optional (m2_post=True, macro M2 interleaved post-processing, **default on**): on the winning
         pool's fusion fixed point apply the strictly-decreasing macro {A,B,C}→{B⊕h,(A⊕h)⊕C}
-        (docs/macro_m2_theory.md; per-case T never regresses, zero CX-worse cases over the full n≤7
-        measurements, 0~2.3ms/case; m2_post=False returns completely to the old convention, for
-        structural comparisons).
+        (docs/architecture.md, Fusion engine highlights). Per-case T never regresses;
+        CX may increase. m2_post=False retains pairwise fusion alone, for structural comparisons.
 
         Emission: grouped by root mask (one X(r) … X(r) sandwich per r), fused segments (r=0) emitted
         independently; an overall X(c) sandwich when FS/FP wins; CNOT(A⁻¹)/CNOT(A) linear sandwich when
@@ -249,7 +247,8 @@ class OracleSynthesizer:
         reorder=False skips the B-4 segment reordering; it is used by the raw MT0/PK0
         baselines, whose pools may contain thousands of blocks and for which the O(m²)
         reordering pass would dominate the runtime (T is unaffected either way). The raw
-        ANF baseline F0 follows the same emission policy for a consistent comparison.
+        ANF baseline F0 and preprocessed DD baseline A0 follow the same emission policy.
+        A0 retains root-mask grouping and DD variable reordering; neither is B-4 reordering.
         """
         # ---- emission: shift sandwich X(c) (no-op when shift_c=0) ----
         shift_qubits = [self.qubit_mgr.get_input_qubit(v) for v in _bits(shift_c)]
@@ -292,6 +291,7 @@ class OracleSynthesizer:
         """
         Starting-cover routes:
 
+          A0  : fully preprocessed DD pool emitted without the fusion engine (baseline);
           MT  : all-minterm pool (one dim-0 block per assignment in supp(f));
           PK  : pseudo-Kronecker cover (per-term polarity, no exorlink rewrites);
           PKS : PK cover with shift search (full enumeration n≤8, climb2 n≥9);
@@ -302,12 +302,19 @@ class OracleSynthesizer:
 
         MT/PK/F0/MT0/PK0 skip the transformation search entirely (T = identity); PKS/PKP
         wrap the emission in the X(c) sandwich. Macro M2 interleaving follows the
-        regular `m2_post` switch for the engine routes; the raw baselines F0/MT0/PK0 skip
+        regular `m2_post` switch for the engine routes; the raw baselines A0/F0/MT0/PK0 skip
         both the engine and the macro (there is no fixed point to apply it to) and are
-        emitted in generator order without the B-4 reordering pass.
+        emitted without the B-4 reordering pass. A0 shares A's complete DD preprocessing
+        (including `self.reorder`) and preserves root-mask sandwiches during emission;
+        the other raw covers have zero root masks and are emitted in generator order.
         """
         n = tt.num_var
-        assert route in ('MT', 'PK', 'PKS', 'PKP', 'F0', 'MT0', 'PK0'), f'illegal cover route: {route}'
+        assert route in ('A0', 'MT', 'PK', 'PKS', 'PKP', 'F0', 'MT0', 'PK0'), f'illegal cover route: {route}'
+        if route == 'A0':
+            # DD root masks are part of the cover semantics, unlike the zero-root raw
+            # generators below. Keep them intact and skip fusion, M2, and B-4 ordering.
+            self._emit_pool(self._bdd_entries(tt, None), [], reorder=False)
+            return
         raw_generators = {'F0': anf_pool, 'MT0': minterm_entries, 'PK0': pk_entries}
         if route in raw_generators:
             entries = raw_generators[route](tt.bitstr, n)

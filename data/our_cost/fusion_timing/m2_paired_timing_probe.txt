@@ -1,0 +1,105 @@
+M2 paired timing probe: FS, zero ancillas, production search/emission
+started UTC: 2026-09-17T09:06:13.125076+00:00
+git revision: 2d66953741a96e8da47a67a0e9fbc102dc81c326
+source SHA256 (including probe): 10155db69f9009a71db9cb502e51aa91cd5827c6caf1a69a0191fc3e3cda0a8c
+platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39; CPU: AMD Ryzen 9 7945HX with Radeon Graphics; Python: 3.12.3
+packages: numpy=2.5.2, qiskit=2.5.2, scipy=1.18.0
+sizes=[6, 9, 11]; cases/size=20; repeats=3; indices=[0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750, 800, 850, 900, 950]
+counts in 10 original strata: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
+warmup index=1, one run/mode/size; repeat=0 excluded from all summaries
+fresh full synthesis per run; alternating balanced order; case order rotated between repeats
+normal GC enabled; explicit pre-run GC, verification, Qiskit conversion and I/O untimed
+times: wall/search/M2/refusion/emission; CPU is whole-process CPU time
+search includes initial cover and candidate fusion; macro excludes timed re-fusion
+wall = search + macro + refusion + emission + other; m2_total = macro + refusion
+cost totals count each function once; timings average all completed repeats
+raw run log: m2_paired_timing_probe_runs.txt
+input n=6 SHA256: 379b9b44477f18bbe696582c1d0b2222e6978a658e9db7e1fe4d066fe1865927
+input n=9 SHA256: 805c35fa883e078918a429e98e5cac1f502d3986c677f0bf94bc997edce421ca
+input n=11 SHA256: 118ab362b8e5dbc3cd88356ce5725f01a5fe2618f6e1599b8429ccb0a564b099
+status: COMPLETE; all circuits verified and all T/CX costs match saved results
+updated UTC: 2026-09-17T09:50:40.120454+00:00
+
+====== n=6: 20 functions, 60 measured pairs ======
+Means below give equal weight to each completed measurement; warmups excluded.
+stage                         off ms        on ms       delta ms
+wall_ms                      58.086773     58.687604      +0.600832
+cpu_ms                       58.101101     58.703081      +0.601981
+search_ms                    56.143441     56.016126      -0.127316
+macro_ms                      0.000000      0.760830      +0.760830
+refusion_ms                   0.000000      0.026819      +0.026819
+m2_total_ms                   0.000000      0.787649      +0.787649
+emit_ms                       1.917206      1.859863      -0.057343
+other_ms                      0.026125      0.023967      -0.002159
+aggregate wall change (on/off - 1): +1.0344%
+aggregate CPU change (on/off - 1): +1.0361%
+M2 + emission delta: +0.730306 ms/case
+on faster in 25/60 measurement pairs
+mean blocks before/after: 12.40 / 12.05
+mean accepted M2 moves: 0.25
+repeat 1: 20 pairs, off=59.095112 ms, on=59.613524 ms, delta=+0.8772%
+repeat 2: 20 pairs, off=57.598711 ms, on=58.976477 ms, delta=+2.3920%
+repeat 3: 20 pairs, off=57.566494 ms, on=57.472812 ms, delta=-0.1627%
+off-first: 30 pairs, wall delta=+1.6538%
+on-first: 30 pairs, wall delta=+0.4139%
+median within-function repeat CV, off: 5.0242%
+median within-function repeat CV, on: 6.2332%
+T (functions counted once): 3224 -> 3158, reduction=2.0471%; better/same/worse=5/15/0
+CX (functions counted once): 2969 -> 2917, reduction=1.7514%; better/same/worse=5/15/0
+
+====== n=9: 20 functions, 60 measured pairs ======
+Means below give equal weight to each completed measurement; warmups excluded.
+stage                         off ms        on ms       delta ms
+wall_ms                    1222.912091   1250.118404     +27.206313
+cpu_ms                     1222.916618   1250.120176     +27.203557
+search_ms                  1075.863604   1077.990739      +2.127136
+macro_ms                      0.000000     24.600722     +24.600722
+refusion_ms                   0.000000      2.916726      +2.916726
+m2_total_ms                   0.000000     27.517447     +27.517447
+emit_ms                     147.005568    144.572389      -2.433178
+other_ms                      0.042920      0.037828      -0.005092
+aggregate wall change (on/off - 1): +2.2247%
+aggregate CPU change (on/off - 1): +2.2245%
+M2 + emission delta: +25.084269 ms/case
+on faster in 16/60 measurement pairs
+mean blocks before/after: 83.85 / 82.40
+mean accepted M2 moves: 1.20
+repeat 1: 20 pairs, off=1243.141760 ms, on=1249.580570 ms, delta=+0.5179%
+repeat 2: 20 pairs, off=1214.079422 ms, on=1250.838893 ms, delta=+3.0278%
+repeat 3: 20 pairs, off=1211.515091 ms, on=1249.935749 ms, delta=+3.1713%
+off-first: 30 pairs, wall delta=+2.1149%
+on-first: 30 pairs, wall delta=+2.3314%
+median within-function repeat CV, off: 2.3719%
+median within-function repeat CV, on: 2.5658%
+T (functions counted once): 44111 -> 43588, reduction=1.1856%; better/same/worse=14/6/0
+CX (functions counted once): 36893 -> 36513, reduction=1.0300%; better/same/worse=14/6/0
+
+====== n=11: 20 functions, 60 measured pairs ======
+Means below give equal weight to each completed measurement; warmups excluded.
+stage                         off ms        on ms       delta ms
+wall_ms                   20105.121933  20598.798609    +493.676676
+cpu_ms                    20104.931572  20598.601183    +493.669611
+search_ms                 16609.396004  16541.593162     -67.802841
+macro_ms                      0.000000    537.726543    +537.726543
+refusion_ms                   0.000000    119.125940    +119.125940
+m2_total_ms                   0.000000    656.852482    +656.852482
+emit_ms                    3495.594404   3400.246546     -95.347858
+other_ms                      0.131525      0.106418      -0.025107
+aggregate wall change (on/off - 1): +2.4555%
+aggregate CPU change (on/off - 1): +2.4555%
+M2 + emission delta: +561.504624 ms/case
+on faster in 6/60 measurement pairs
+mean blocks before/after: 320.40 / 316.75
+mean accepted M2 moves: 3.20
+repeat 1: 20 pairs, off=19828.707617 ms, on=20421.744847 ms, delta=+2.9908%
+repeat 2: 20 pairs, off=20028.053944 ms, on=20344.225824 ms, delta=+1.5786%
+repeat 3: 20 pairs, off=20458.604236 ms, on=21030.425156 ms, delta=+2.7950%
+off-first: 30 pairs, wall delta=+2.5150%
+on-first: 30 pairs, wall delta=+2.3961%
+median within-function repeat CV, off: 2.1565%
+median within-function repeat CV, on: 2.0096%
+T (functions counted once): 225487 -> 223347, reduction=0.9491%; better/same/worse=20/0/0
+CX (functions counted once): 182031 -> 180444, reduction=0.8718%; better/same/worse=20/0/0
+
+
+Naming note (2026-09-18): the original F route is now FS. Only route labels were updated; measurements, source hashes, and run timestamps remain those of the original run.

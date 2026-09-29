@@ -30,8 +30,10 @@ def evaluate_order(num_var=3):
     with open(f'data/test_cases/test_cases_{num_var}', 'r') as f:
         lines = f.readlines()
 
-    synthesizer_reorder = OracleSynthesizer(reorder=True)
-    synthesizer_noorder = OracleSynthesizer(reorder=False)
+    # Preserve this historical one-ancilla DD experiment explicitly; the public
+    # constructor now defaults to zero-ancilla FS, where DD reordering has no effect.
+    synthesizer_reorder = OracleSynthesizer(reorder=True, ancilla_num=1)
+    synthesizer_noorder = OracleSynthesizer(reorder=False, ancilla_num=1)
     better, worse, eqv = 0, 0, 0
     worse_cases = []
     for counter in range(len(lines)):
@@ -52,7 +54,7 @@ def evaluate_order(num_var=3):
         elif t_cost_reorder == t_cost_noorder: eqv += 1
         else: better += 1
 
-    print("****** Comparison of TDD-based Method Alg. 1 to Exorcism  ******")
+    print("****** Legacy DD variable reordering comparison (one ancilla) ******")
     print(f"number of input variables: {num_var}")
     print(f"lower  t-cost in {better}({better / len(lines) * 100}%) cases")
     print(f"higher t-cost in {worse}({worse / len(lines) * 100}%) cases")

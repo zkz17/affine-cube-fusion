@@ -1,5 +1,8 @@
+import argparse
+from contextlib import ExitStack
 import os
-import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import time
 from qiskit.circuit.library.standard_gates.x import XGate, CXGate, MCXGate, CCXGate
 
@@ -15,10 +18,10 @@ CX_COST_FN = config['cx_cost']
 # All supported synthesis routes, selected by a single `path` argument.
 # A/F/FS are the BDD/ANF/FPRM routes, FP is FS with the proxy prescreen, FG the GL search,
 # MT/PK the engine routes over the minterm / pseudo-Kronecker covers, PKS/PKP their
-# shift-search variants, and F0/MT0/PK0 the raw covers emitted without the fusion engine.
-ROUTES = ('A', 'F', 'FS', 'FP', 'FG', 'MT', 'PK', 'PKS', 'PKP', 'F0', 'MT0', 'PK0')
+# shift-search variants, and A0/F0/MT0/PK0 the covers emitted without the fusion engine.
+ROUTES = ('A', 'F', 'FS', 'FP', 'FG', 'MT', 'PK', 'PKS', 'PKP', 'A0', 'F0', 'MT0', 'PK0')
 ENGINE_ROUTES = ('A', 'F', 'FS', 'FP', 'FG', 'MT', 'PK', 'PKS', 'PKP')
-RAW_ROUTES = ('F0', 'MT0', 'PK0')
+RAW_ROUTES = ('A0', 'F0', 'MT0', 'PK0')
 COVER_ROUTES = ('MT', 'PK', 'PKS', 'PKP') + RAW_ROUTES
 
 
@@ -59,12 +62,14 @@ def count_cx_cost(circ):
 
 def load_aligned(cases_path, cost_path, start, stop):
     """
-    Read test cases and per-case baseline costs (aligned by line number).
-    Returns (cases, costs); costs=None when cost_path is missing or empty (e.g. sshr left empty for n≥7).
+    Read baseline costs only after checking their truth-table keys against the inputs.
+    Missing, empty, or shorter baselines return costs=None; malformed or misaligned
+    records in the requested interval are errors, including a shorter file's prefix.
     """
     with open(cases_path) as f:
         lines = f.readlines()
-    stop = stop if stop <= len(lines) else len(lines)
+    if not 0 <= start < stop <= len(lines):
+        raise ValueError(f'Require 0 <= start < stop <= {len(lines)} input cases.')
     cases = [int(line.rstrip('\n')) for line in lines[start:stop]]
 
     try:
@@ -72,9 +77,19 @@ def load_aligned(cases_path, cost_path, start, stop):
             clines = f.readlines()
     except FileNotFoundError:
         return cases, None
+    costs = []
+    for index, (case, line) in enumerate(zip(cases, clines[start:stop]), start=start):
+        try:
+            key, cost = map(int, line.split(':'))
+        except ValueError as exc:
+            raise ValueError(f'Malformed baseline record: {cost_path}, line {index + 1}') from exc
+        if key != case:
+            raise ValueError(f'Baseline truth-table mismatch: {cost_path}, line {index + 1}')
+        if cost < 0:
+            raise ValueError(f'Negative baseline cost: {cost_path}, line {index + 1}')
+        costs.append(cost)
     if stop > len(clines):
         return cases, None
-    costs = [int(line.split(':')[1]) for line in clines[start:stop]]
     return cases, costs
 
 
@@ -108,32 +123,39 @@ def _compare(name, cases, ours, baseline):
     ]
 
 
-def evaluate_all(num_var=3, start=0, stop=None, path='FS', m2_post=True, reorder=True):
+def evaluate_all(num_var=3, start=0, stop=None, path='FS', m2_post=True, reorder=True,
+                 *, output_dir='data/our_cost', overwrite=False):
     """
     Compare a synthesis route against Exorcism / SSHR (T and CX dual scopes).
 
     Usage: evaluate.py <n> <start> <stop> <path> [m2] [reorder]
+                       [--output-dir DIR] [--overwrite]
 
-    path    : the synthesis route, one of A / F / FS / FP / FG / MT / PK / PKS / PKP / F0 / MT0 / PK0.
+    path    : one of A / A0 / F / FS / FP / FG / MT / PK / PKS / PKP / F0 / MT0 / PK0.
               A = BDD decomposition, F = plain ANF, FS = FPRM (shift search), FP = FS with the
               proxy prescreen, FG = deterministic GL(n,2) search, MT/PK = minterm /
               pseudo-Kronecker covers fused by the engine, PKS/PKP = their shift-search
               variants, F0/MT0/PK0 = raw ANF/minterm/PK covers emitted without fusion (baselines).
+              A0 = A's complete DD preprocessing, then emission without fusion or segment reordering.
     m2      : macro M2 interleaved post-processing (1 = on, default; 0 = off, tagged `_noM2`).
-              Ignored for F0/MT0/PK0, which skip the engine entirely.
-    reorder : variable reordering for the BDD route A only (1 = on, default).
+              Ignored for A0/F0/MT0/PK0, which skip the engine entirely.
+    reorder : DD variable reordering for A and A0 (1 = on, default); not segment reordering.
 
-    Outputs are written to `data/our_cost/{path}/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt` and
-    `data/our_cost/{path}/our_results_{tag}_{n}_{a}_{b}.txt`. Both M2 settings share the
+    Outputs are written to `{output_dir}/{path}/our_{t,cx}_cost_{tag}_{n}_{a}_{b}.txt` and
+    `{output_dir}/{path}/our_results_{tag}_{n}_{a}_{b}.txt`. Both M2 settings share the
     base route directory; only filenames carry the `_noM2` suffix. The G-3 degree lower bound is
     reported inside the results file but no longer written as a separate file (it depends
-    only on the test set, not on the route).
+    only on the test set, not on the route). Existing outputs require overwrite=True.
+    Synthesis and verification finish before any result files are published.
     """
-    assert path in ROUTES, f'illegal route: {path}'
+    if path not in ROUTES:
+        raise ValueError(f'illegal route: {path}')
     cases_path = f'data/test_cases/test_cases_{num_var}'
     with open(cases_path) as f:
         n_total = len(f.readlines())
-    stop = stop if stop is not None and stop <= n_total else n_total
+    stop = n_total if stop is None else stop
+    if not 0 <= start < stop <= n_total:
+        raise ValueError(f'Require 0 <= start < stop <= {n_total} input cases.')
     total = stop - start
 
     cases, exor_t = load_aligned(cases_path, f'data/exorcism_cost/exorcism_t_cost_{num_var}', start, stop)
@@ -142,10 +164,13 @@ def evaluate_all(num_var=3, start=0, stop=None, path='FS', m2_post=True, reorder
     _, sshr_cx = load_aligned(cases_path, f'data/sshr_cost/sshr_cx_cost_{num_var}', start, stop)
 
     tag = path if path in RAW_ROUTES else path + ('' if m2_post else '_noM2')
-    outdir = f'data/our_cost/{path}'
-    os.makedirs(outdir, exist_ok=True)
-    out_t = open(f'{outdir}/our_t_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w', encoding='utf-8')
-    out_cx = open(f'{outdir}/our_cx_cost_{tag}_{num_var}_{start}_{stop}.txt', 'w', encoding='utf-8')
+    outdir = Path(output_dir) / path
+    suffix = f'{tag}_{num_var}_{start}_{stop}.txt'
+    output_paths = [outdir / f'our_{kind}_{suffix}' for kind in ('t_cost', 'cx_cost', 'results')]
+    if not overwrite:
+        for target in output_paths:
+            if target.exists():
+                raise FileExistsError(f'Refusing to overwrite {target}; use --output-dir or --overwrite.')
 
     # Ancilla-assisted synthesis is not an evaluation option: every route uses zero ancillas.
     kwargs = dict(reorder=reorder, ancilla_num=0, fused_backend=True, m2_post=m2_post)
@@ -179,14 +204,9 @@ def evaluate_all(num_var=3, start=0, stop=None, path='FS', m2_post=True, reorder
         t, cx = count_costs(to_qiskit(synthesizer.circ))
         bound = T_COST_FN(anf_degree(truth_table.bitstr, num_var))
 
-        out_t.write(f'{tt}:{t}\n')
-        out_cx.write(f'{tt}:{cx}\n')
         ours_t.append(t)
         ours_cx.append(cx)
         bounds.append(bound)
-
-    out_t.close()
-    out_cx.close()
 
     avg_wall_ms = wall_ns / max(total, 1) / 1e6
     report = ["****** Comparison of oracle synthesis routes ******",
@@ -201,22 +221,51 @@ def evaluate_all(num_var=3, start=0, stop=None, path='FS', m2_post=True, reorder
     report.append("****** ****** ******")
 
     text = '\n'.join(report) + '\n'
-    with open(f'{outdir}/our_results_{tag}_{num_var}_{start}_{stop}.txt', 'w', encoding='utf-8') as f:
-        f.write(text)
+    contents = [''.join(f'{tt}:{cost}\n' for tt, cost in zip(cases, costs))
+                for costs in (ours_t, ours_cx)] + [text]
+    outdir.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix='.evaluation-', dir=outdir) as staging:
+        for target, content in zip(output_paths, contents):
+            (Path(staging) / target.name).write_text(content, encoding='utf-8')
+        if overwrite:
+            for target in output_paths:
+                os.replace(Path(staging) / target.name, target)
+        else:
+            # Exclusive creation also protects against another run finishing between
+            # the initial existence check and publication. Roll back only our own files.
+            created = []
+            try:
+                with ExitStack() as stack:
+                    streams = []
+                    for target in output_paths:
+                        streams.append(stack.enter_context(target.open('x', encoding='utf-8')))
+                        created.append(target)
+                    for stream, content in zip(streams, contents):
+                        stream.write(content)
+            except BaseException:
+                for target in created:
+                    target.unlink()
+                raise
     print(text, end='')
 
 
-def main():
-    num_var = int(sys.argv[1]) if len(sys.argv) >= 2 else 3
-    start   = int(sys.argv[2]) if len(sys.argv) >= 3 else 0
-    stop    = int(sys.argv[3]) if len(sys.argv) >= 4 else None
-    path    = sys.argv[4] if len(sys.argv) >= 5 else 'FS'
-    m2      = int(sys.argv[5]) if len(sys.argv) >= 6 else 1
-    reorder = int(sys.argv[6]) if len(sys.argv) >= 7 else 1
-    assert path in ROUTES, f'illegal route: {path}'
-    assert m2 in (0, 1), f'illegal m2 switch (0/1): {m2}'
-
-    evaluate_all(num_var, start, stop, path, m2_post=m2 > 0, reorder=reorder > 0)
+def main(argv=None):
+    parser = argparse.ArgumentParser(description='Evaluate and verify one oracle synthesis route.')
+    parser.add_argument('n', nargs='?', type=int, default=3)
+    parser.add_argument('start', nargs='?', type=int, default=0)
+    parser.add_argument('stop', nargs='?', type=int, default=None)
+    parser.add_argument('path', nargs='?', choices=ROUTES, default='FS')
+    parser.add_argument('m2', nargs='?', type=int, choices=(0, 1), default=1)
+    parser.add_argument('reorder', nargs='?', type=int, choices=(0, 1), default=1)
+    parser.add_argument('--output-dir', type=Path, default=Path('data/our_cost'),
+                        help='result root; each route gets a subdirectory (default: data/our_cost)')
+    parser.add_argument('--overwrite', action='store_true', help='allow replacing an existing batch')
+    args = parser.parse_args(argv)
+    try:
+        evaluate_all(args.n, args.start, args.stop, args.path, m2_post=bool(args.m2),
+                     reorder=bool(args.reorder), output_dir=args.output_dir, overwrite=args.overwrite)
+    except (ValueError, FileExistsError) as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

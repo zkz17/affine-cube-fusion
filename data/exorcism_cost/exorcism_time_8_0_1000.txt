@@ -1,0 +1,6 @@
+t_cost
+  total runtime  : 14950.57169 ms
+  average runtime: 14.95057169 ms
+cx_cost
+  total runtime  : 14821.131055 ms
+  average runtime: 14.821131055 ms

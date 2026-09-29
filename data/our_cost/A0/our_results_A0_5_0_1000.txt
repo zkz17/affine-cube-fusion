@@ -1,0 +1,29 @@
+****** Comparison of oracle synthesis routes ******
+number of input variables: 5 (1000 cases); path=A0
+avg synthesize wall: 2.56 ms/case
+===== Exorcism T =====
+lower  cost in 790(79.0%) cases
+higher cost in 171(17.1%) cases
+same   cost in 39(3.9%) cases
+cases with higher cost: [427997118, 396683254, 418105803, 376591736, 133330054, 20782273, 258806852, 20026820, 205341273, 112435636, 347724642, 411527622, 86145882, 100256040, 134232270, 57109176, 344528234, 295809419, 692348288, 694575482]
+total cost: baseline 109591, ours 89206 (reduction 18.60%)
+===== Exorcism CX =====
+lower  cost in 596(59.599999999999994%) cases
+higher cost in 385(38.5%) cases
+same   cost in 19(1.9%) cases
+cases with higher cost: [18041511, 427997118, 396683254, 418105803, 164556197, 376591736, 133330054, 20782273, 56241495, 258806852, 49728390, 20026820, 205341273, 53545466, 97971459, 37889143, 85988122, 112435636, 223907857, 45398208]
+total cost: baseline 86937, ours 81968 (reduction 5.72%)
+===== SSHR T =====
+lower  cost in 498(49.8%) cases
+higher cost in 433(43.3%) cases
+same   cost in 69(6.9%) cases
+cases with higher cost: [140660955, 427997118, 304435529, 418105803, 164556197, 376591736, 78959815, 321295011, 140719781, 28873346, 133330054, 140016881, 393302363, 28081375, 20782273, 6126001, 56241495, 258806852, 369578456, 20026820]
+total cost: baseline 89726, ours 89206 (reduction 0.58%)
+===== SSHR CX =====
+lower  cost in 556(55.60000000000001%) cases
+higher cost in 426(42.6%) cases
+same   cost in 18(1.7999999999999998%) cases
+cases with higher cost: [140660955, 427997118, 304435529, 418105803, 164556197, 376591736, 376636639, 78959815, 339666547, 321295011, 140719781, 28873346, 192799588, 133330054, 140016881, 28081375, 165972963, 20782273, 6126001, 56241495]
+total cost: baseline 84483, ours 81968 (reduction 2.98%)
+G-3 lower bound: Σ t(deg f) = 26752 (29.99% of ours ΣT)
+****** ****** ******

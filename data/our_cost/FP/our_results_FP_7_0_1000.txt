@@ -1,6 +1,6 @@
-****** Comparison of TDD-based Method Alg. 1 (fused backend) ******
-number of input variables: 7 (1000 cases); paths=FP
-avg synthesize wall: 41.19 ms/case
+****** Comparison of oracle synthesis routes ******
+number of input variables: 7 (1000 cases); path=FP
+avg synthesize wall: 40.85 ms/case
 ===== Exorcism T =====
 lower  cost in 1000(100.0%) cases
 higher cost in 0(0.0%) cases

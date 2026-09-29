@@ -4,13 +4,14 @@ P1 probe (entry bar for plan A): correlation and top-k retention of FPRM fusion-
 
 Proxies (all intermediate products of anf_pool, zero extra Möbius):
   L  = Σ |S| (total literal count)
-  S0 = Σ t(n−|S|) (exact pre-fusion ΣT, near-linear table)
+  S0 = Σ t(n−|S|) (legacy heuristic; raw ANF T cost is Σ t(|S|))
   P  = count of pairs differing by one variable (density of C3 necessarily-fusible pairs)
   S1 = S0 − P (λ=1 combination)
 
 Output: Spearman rank correlation (per-case mean), top-k retention curve
       (k ∈ {1,2,4,8,16,32}; retention = the gain share of the top-k best versus the full-enumeration best).
-Decision rule (docs/fprm_proxy_and_pair_rotation.md §4): top-8 retention ≥ 70% ⇒ adopt.
+Historical probe decision rule: top-8 retention ≥ 70% ⇒ adopt.
+The current FP route is described in docs/architecture.md, Fusion engine highlights.
 """
 import argparse
 import os

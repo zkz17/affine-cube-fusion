@@ -480,3 +480,213 @@ same   cost in 376(37.6%) cases
 cases with higher cost: []
 total cost: baseline 1857789, ours 1842192 (reduction 0.84%)
 
+****** MT n=10 (1000 cases) ******
+input interval: [0, 1000)
+===== MT n=10 T =====
+lower  cost in 125(12.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 875(87.5%) cases
+cases with higher cost: []
+total cost: baseline 6872186, ours 6860274 (reduction 0.17%)
+===== MT n=10 CX =====
+lower  cost in 125(12.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 875(87.5%) cases
+cases with higher cost: []
+total cost: baseline 5684910, ours 5676262 (reduction 0.15%)
+
+****** MT n=11 (1000 cases) ******
+input interval: [0, 1000)
+===== MT n=11 T =====
+lower  cost in 116(11.6%) cases
+higher cost in 0(0.0%) cases
+same   cost in 884(88.4%) cases
+cases with higher cost: []
+total cost: baseline 14361659, ours 14349057 (reduction 0.09%)
+===== MT n=11 CX =====
+lower  cost in 116(11.6%) cases
+higher cost in 0(0.0%) cases
+same   cost in 884(88.4%) cases
+cases with higher cost: []
+total cost: baseline 11844666, ours 11835464 (reduction 0.08%)
+
+****** MT n=5 (1000 cases) ******
+input interval: [0, 1000)
+===== MT n=5 T =====
+lower  cost in 101(10.1%) cases
+higher cost in 0(0.0%) cases
+same   cost in 899(89.9%) cases
+cases with higher cost: []
+total cost: baseline 134397, ours 130761 (reduction 2.71%)
+===== MT n=5 CX =====
+lower  cost in 101(10.1%) cases
+higher cost in 0(0.0%) cases
+same   cost in 899(89.9%) cases
+cases with higher cost: []
+total cost: baseline 116848, ours 114031 (reduction 2.41%)
+
+****** MT n=6 (1000 cases) ******
+input interval: [0, 1000)
+===== MT n=6 T =====
+lower  cost in 118(11.8%) cases
+higher cost in 0(0.0%) cases
+same   cost in 882(88.2%) cases
+cases with higher cost: []
+total cost: baseline 313701, ours 308270 (reduction 1.73%)
+===== MT n=6 CX =====
+lower  cost in 118(11.8%) cases
+higher cost in 0(0.0%) cases
+same   cost in 882(88.2%) cases
+cases with higher cost: []
+total cost: baseline 267244, ours 263158 (reduction 1.53%)
+
+****** MT n=7 (1000 cases) ******
+input interval: [0, 1000)
+===== MT n=7 T =====
+lower  cost in 113(11.3%) cases
+higher cost in 0(0.0%) cases
+same   cost in 887(88.7%) cases
+cases with higher cost: []
+total cost: baseline 692433, ours 685450 (reduction 1.01%)
+===== MT n=7 CX =====
+lower  cost in 113(11.3%) cases
+higher cost in 0(0.0%) cases
+same   cost in 887(88.7%) cases
+cases with higher cost: []
+total cost: baseline 584290, ours 579102 (reduction 0.89%)
+
+****** MT n=8 (1000 cases) ******
+input interval: [0, 1000)
+===== MT n=8 T =====
+lower  cost in 105(10.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 895(89.5%) cases
+cases with higher cost: []
+total cost: baseline 1512735, ours 1505464 (reduction 0.48%)
+===== MT n=8 CX =====
+lower  cost in 105(10.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 895(89.5%) cases
+cases with higher cost: []
+total cost: baseline 1265976, ours 1260504 (reduction 0.43%)
+
+****** MT n=9 (1000 cases) ******
+input interval: [0, 1000)
+===== MT n=9 T =====
+lower  cost in 141(14.1%) cases
+higher cost in 0(0.0%) cases
+same   cost in 859(85.9%) cases
+cases with higher cost: []
+total cost: baseline 3239434, ours 3228221 (reduction 0.35%)
+===== MT n=9 CX =====
+lower  cost in 141(14.1%) cases
+higher cost in 0(0.0%) cases
+same   cost in 859(85.9%) cases
+cases with higher cost: []
+total cost: baseline 2693432, ours 2685166 (reduction 0.31%)
+
+****** PK n=10 (1000 cases) ******
+input interval: [0, 1000)
+===== PK n=10 T =====
+lower  cost in 982(98.2%) cases
+higher cost in 0(0.0%) cases
+same   cost in 18(1.8%) cases
+cases with higher cost: []
+total cost: baseline 6766073, ours 6505710 (reduction 3.85%)
+===== PK n=10 CX =====
+lower  cost in 982(98.2%) cases
+higher cost in 0(0.0%) cases
+same   cost in 18(1.8%) cases
+cases with higher cost: []
+total cost: baseline 5324094, ours 5131824 (reduction 3.61%)
+
+****** PK n=11 (1000 cases) ******
+input interval: [0, 1000)
+===== PK n=11 T =====
+lower  cost in 1000(100.0%) cases
+higher cost in 0(0.0%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: []
+total cost: baseline 14762607, ours 14262237 (reduction 3.39%)
+===== PK n=11 CX =====
+lower  cost in 1000(100.0%) cases
+higher cost in 0(0.0%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: []
+total cost: baseline 11537664, ours 11167292 (reduction 3.21%)
+
+****** PK n=5 (1000 cases) ******
+input interval: [0, 1000)
+===== PK n=5 T =====
+lower  cost in 285(28.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 715(71.5%) cases
+cases with higher cost: []
+total cost: baseline 112247, ours 103359 (reduction 7.92%)
+===== PK n=5 CX =====
+lower  cost in 285(28.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 715(71.5%) cases
+cases with higher cost: []
+total cost: baseline 93998, ours 87711 (reduction 6.69%)
+
+****** PK n=6 (1000 cases) ******
+input interval: [0, 1000)
+===== PK n=6 T =====
+lower  cost in 435(43.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 565(56.5%) cases
+cases with higher cost: []
+total cost: baseline 265963, ours 248365 (reduction 6.62%)
+===== PK n=6 CX =====
+lower  cost in 435(43.5%) cases
+higher cost in 0(0.0%) cases
+same   cost in 565(56.5%) cases
+cases with higher cost: []
+total cost: baseline 219087, ours 206436 (reduction 5.77%)
+
+****** PK n=7 (1000 cases) ******
+input interval: [0, 1000)
+===== PK n=7 T =====
+lower  cost in 579(57.9%) cases
+higher cost in 0(0.0%) cases
+same   cost in 421(42.1%) cases
+cases with higher cost: []
+total cost: baseline 611581, ours 577638 (reduction 5.55%)
+===== PK n=7 CX =====
+lower  cost in 579(57.9%) cases
+higher cost in 0(0.0%) cases
+same   cost in 421(42.1%) cases
+cases with higher cost: []
+total cost: baseline 497114, ours 472416 (reduction 4.97%)
+
+****** PK n=8 (1000 cases) ******
+input interval: [0, 1000)
+===== PK n=8 T =====
+lower  cost in 780(78.0%) cases
+higher cost in 0(0.0%) cases
+same   cost in 220(22.0%) cases
+cases with higher cost: []
+total cost: baseline 1373697, ours 1304094 (reduction 5.07%)
+===== PK n=8 CX =====
+lower  cost in 780(78.0%) cases
+higher cost in 0(0.0%) cases
+same   cost in 220(22.0%) cases
+cases with higher cost: []
+total cost: baseline 1102336, ours 1051411 (reduction 4.62%)
+
+****** PK n=9 (1000 cases) ******
+input interval: [0, 1000)
+===== PK n=9 T =====
+lower  cost in 908(90.8%) cases
+higher cost in 0(0.0%) cases
+same   cost in 92(9.2%) cases
+cases with higher cost: []
+total cost: baseline 3062223, ours 2925369 (reduction 4.47%)
+===== PK n=9 CX =====
+lower  cost in 908(90.8%) cases
+higher cost in 0(0.0%) cases
+same   cost in 92(9.2%) cases
+cases with higher cost: []
+total cost: baseline 2431186, ours 2330580 (reduction 4.14%)
+

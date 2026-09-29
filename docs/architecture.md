@@ -51,8 +51,10 @@ Key points:
 
 - The production path is the **fused backend** (`OracleSynthesizer.fused_backend=True` with
   `ancilla_num=0`). Evaluation explicitly fixes zero ancillas and exposes no ancilla argument.
-  The class retains a legacy `ancilla_num=1` default for older callers; direct fused-backend
-  callers must pass zero explicitly. Ancilla-assisted synthesis is outside the current experiments.
+  The class also defaults to `ancilla_num=0`, `paths=('FS',)`, and `m2_post=True`.
+  Explicit nonzero ancilla counts retain the historical backend; ancilla-assisted synthesis
+  is outside the current experiments. `order_evaluate.py` explicitly selects its historical
+  one-ancilla DD configuration instead of inheriting the constructor defaults.
 - `limbdd/patterns/` only serves the split patterns of the BDD graph phase; the fusion engine does
   not depend on BDD and merely consumes pool entries `(CompleteBranch, root_mask, key)`.
 
@@ -108,6 +110,13 @@ the same fusion engine. **PKS** searches shifted PK covers (all shifts for n≤8
 climb for n≥9); **PKP** prescreens shifts and fuses the top-8 plus c=0. These four routes
 honor `m2_post`. **F0 / MT0 / PK0** emit raw ANF / minterm / PK covers in generator order,
 with no fusion, M2, or segment reordering. This gives three corresponding raw-cover baselines.
+**A0** uses the same `process_cover_route` entry: `_bdd_entries` performs A's complete
+DD preprocessing (including variable reordering and splitting), and `_emit_pool`
+emits the entries directly with `reorder=False`. The entries keep their root masks,
+so the usual root-mask grouping and X sandwiches remain. A0 skips pairwise fusion,
+M2, and B-4 circuit segment reordering, while retaining shared basic simplification.
+It is the fourth raw-cover baseline; `m2_post` is ignored. DD variable reordering
+and B-4 circuit segment reordering are separate operations.
 
 ### 2.3 Emission pipeline (tail of `process_fused_global`)
 
@@ -225,12 +234,18 @@ data/our_cost/
   no_M2_vs_default.txt
 ```
 
-- `path` is one of `A F FS FP FG MT PK PKS PKP F0 MT0 PK0`. `tag` is the route name, with
+- `path` is one of `A A0 F FS FP FG MT PK PKS PKP F0 MT0 PK0`. `tag` is the route name, with
   `_noM2` appended when M2 is disabled; both variants share the base route directory.
-  Raw F0/MT0/PK0 always use their plain tag and ignore the M2 switch.
+  Raw A0/F0/MT0/PK0 always use their plain tag and ignore the M2 switch.
 - Classic campaign: n=3 all 256 cases, n=4 all 65536, n=5–7 10000 each, n=8–11 1000 each;
   FG stops at n=7. Cover routes use the first 1000 cases for each n=5..11. Saved no-M2
-  comparisons cover A/F/FS/FP at n=4..11, 1000 cases each. See `data/README.md` for exact coverage.
+  comparisons cover A/F/FS/FP at n=4..11 and MT/PK at n=5..11, 1000 cases each.
+  DD0/A0 and matched A/F/FS/FP batches complete the first-1000-case comparisons at n=5..11.
+  See `data/README.md` for exact coverage and the sequential timing reruns.
+- `evaluate.py --output-dir DIR` preserves the same per-route layout under a separate result
+  root. Existing files are rejected unless `--overwrite` is explicit. The whole batch is
+  synthesized and verified before result files are written. Baselines must match the input
+  truth-table keys, and invalid input intervals are rejected rather than clipped.
 
 ---
 
@@ -238,7 +253,7 @@ data/our_cost/
 
 1. **Routine changes are tested for n≤7 only**; n≥8 runs are reserved for the final aggregation round
    (time budget).
-2. **Single-path discipline**: each evaluation measures one of the twelve routes, with no
+2. **Single-path discipline**: each evaluation measures one of the thirteen routes, with no
    min taken across routes; FP and FG are never implicitly combined with the default FS.
 3. **Determinism**: full enumeration / deterministic start sets (`climb2`, the GL start set, the
    `(S1,c)` proxy ordering) / deterministic tie-breaking; no random sampling (the old rand64 sampler
@@ -251,7 +266,8 @@ data/our_cost/
    controlled timing comparisons require the same environment and execution conditions.
 6. **Emission verification**: the evaluator rejects a circuit unless `circ.verify(tt)` succeeds.
    `test.py -y -z` covers raw ANF semantics/costs, all evaluation routes with both M2 settings,
-   directory conventions, and summary consumers on multiple nonzero input intervals.
+   directory conventions, safe reruns, baseline alignment, zero-ancilla constructor defaults,
+   and summary consumers on multiple nonzero input intervals.
 
 ---
 
@@ -307,7 +323,7 @@ that FS at n=9 is faster than at n=8 is explained by the FPRM budget switch in �
   the intended substitute for FS in time-sensitive runs.
 - **M2**: on by default; accepted moves strictly decrease T. CX is not part of the macro
   acceptance condition and can increase (the saved A comparisons at n=10/11 include such cases).
-  Use `data/our_cost/no_M2_vs_default.txt` for the saved A/F/FS/FP comparisons; no saved FG
+  Use `data/our_cost/no_M2_vs_default.txt` for the saved A/F/FS/FP/MT/PK comparisons; no saved FG
   no-M2 campaign is included in that report.
 
 ### 6.4 Input-qubit allocation fix (fused backend)

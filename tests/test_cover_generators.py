@@ -11,7 +11,9 @@ Invariants:
      negative-polarity cube x̄1 x̄2 x̄3, i.e. one block of cost t(3);
   4. engine sanity: fusing a two-point minterm pool yields a single line block.
 """
-from random import randint
+from contextlib import ExitStack
+from random import Random, randint
+from unittest.mock import patch
 
 from utils.TruthTable import TruthTable
 from backend.fusion.BranchFusion import fuse_pool_global, pool_t_cost, shift_fn
@@ -134,6 +136,61 @@ def test_raw_anf_emission(verbose=False):
     print('Raw ANF emission test passed!!!')
 
 
+def test_raw_dd_emission(verbose=False):
+    """A0 preserves the preprocessed DD cover, including root masks and split pieces.
+
+    Exhaust all 3-input functions and include larger deterministic samples. Guards
+    make accidentally enabling any post-DD optimization fail, even if semantics
+    would still be correct. Reuse each synthesizer to exercise batch state clearing.
+    """
+    print('Testing raw DD emission, DD reorder, and disabled post-DD optimizations...')
+    rng = Random(20260923)
+    cases = [(3, range(256)),
+             (5, [0, (1 << 32) - 1, 1] + [rng.getrandbits(32) for _ in range(16)]),
+             (7, [rng.getrandbits(128) for _ in range(8)])]
+    seen_root_mask = seen_split_pieces = False
+    costs_without_m2 = {}
+    with ExitStack() as guards:
+        for name in ('fuse_pool_global', 'm2_interleaved', 'order_segments_greedy'):
+            guards.enter_context(patch(
+                f'backend.OracleSynthesizer.{name}',
+                side_effect=AssertionError(f'A0 called disabled optimization {name}')))
+        for reorder in (False, True):
+            for m2 in (False, True):
+                s = OracleSynthesizer(ancilla_num=0, reorder=reorder, m2_post=m2)
+                extract = s._bdd_entries
+
+                def checked_entries(tt, path):
+                    nonlocal seen_root_mask, seen_split_pieces
+                    entries = extract(tt, path)
+                    assert pool_xor(entries, tt.num_var) == tt.bitstr, 'DD cover XOR invariant'
+                    seen_root_mask |= any(r for _, r, _ in entries)
+                    seen_split_pieces |= len({idx for _, _, idx in entries}) > 1
+                    return entries
+
+                with patch.object(s, '_bdd_entries', side_effect=checked_entries), \
+                        patch.object(s, 'variable_reorder', wraps=s.variable_reorder) as dd_reorder:
+                    for n, functions in cases:
+                        for fn in functions:
+                            s.clear()
+                            s.allocate_input_qubit(n)
+                            tt = TruthTable(fn, n)
+                            dd_reorder.reset_mock()
+                            s.process_cover_route(tt, 'A0')
+                            assert dd_reorder.call_count == int(reorder), 'DD reorder switch ignored'
+                            assert s.circ.verify(tt), ('A0 semantics', reorder, m2, n, fn)
+                            assert not s.qubit_mgr.anc, 'A0 allocated an ancilla'
+                            costs = count_costs(to_qiskit(s.circ))
+                            key = (reorder, n, fn)
+                            if not m2:
+                                costs_without_m2[key] = costs
+                            else:
+                                assert costs == costs_without_m2[key], 'A0 depends on M2 setting'
+    assert seen_root_mask, 'samples did not exercise DD root-mask preservation'
+    assert seen_split_pieces, 'samples did not exercise multiple DD pieces'
+    print('Raw DD emission test passed!!!')
+
+
 def main(verbose=False):
     for n, rounds in ((4, 60), (5, 40), (6, 20)):
         test_cover_generators_invariants(n, rounds, verbose)
@@ -141,4 +198,5 @@ def main(verbose=False):
     test_minterm_engine_sanity(verbose)
     test_pk_shift_routes(4, 40, verbose)
     test_raw_anf_emission(verbose)
+    test_raw_dd_emission(verbose)
     print('====== All cover generator tests passed!!! ======')

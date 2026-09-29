@@ -4,9 +4,12 @@ figure/
 data_bak/
 refactor_notes.md
 venv/
+runs/
 __pycache__/
 experiments/phase0_results/
 data/*.so
+Affine_Cube_Fusion.pdf
+Affine_Cube_Fusion__IEEE_.pdf
 
 # private working notes (kept locally, never tracked)
 docs/future_work.md

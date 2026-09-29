@@ -1,0 +1,29 @@
+Full 1000-case sequential reruns of the six previously concurrent no-M2 batches
+started UTC: 2026-09-26T03:58:55.076754+00:00
+git revision: 80f1985c49ea6d21c8bd98264f94ea3df47402f3
+production source SHA256: df37480ce9cd693f53dd83096b755f0f7b933586720bf3f29cbe475c2488174c
+platform: Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39; Python: 3.12.3
+CPU: AMD Ryzen 9 7945HX; same machine/environment as previous measurements
+packages: numpy=2.5.2, qiskit=2.5.2, scipy=1.18.0
+protocol: unmodified evaluate.evaluate_all(n, 0, 1000, route, m2_post=False, reorder=True)
+one batch/worker at a time, each of the first 1000 input functions exactly once
+no sampling, repeated trials, explicit pre-run GC, or excluded warm-up functions
+mean = sum of all 1000 synthesis wall durations / 1000, as written by evaluate.py
+verification, Qiskit conversion, gate-cost accounting and file I/O excluded by evaluate.py
+each completed batch verifies every circuit and must exactly match all saved T/CX records
+original cost files are preserved; only completed, validated canonical result reports are replaced
+archived original concurrent reports: concurrent_20260924/
+job order: [('MT', 9), ('PK', 9), ('MT', 10), ('PK', 10), ('MT', 11), ('PK', 11)]
+input n=9 SHA256: 805c35fa883e078918a429e98e5cac1f502d3986c677f0bf94bc997edce421ca
+input n=10 SHA256: d7cd3242f3a98a61206bf5f79a97f9ce9af90b7dd5e372eb5b2b4bba5f810414
+input n=11 SHA256: 118ab362b8e5dbc3cd88356ce5725f01a5fe2618f6e1599b8429ccb0a564b099
+status: COMPLETE; 6000 circuits verified; every saved T/CX cost unchanged; six canonical reports updated
+updated UTC: 2026-09-26T05:59:05.285844+00:00
+
+route n cases previous_concurrent_ms sequential_batch_ms
+MT_noM2 9 1000 265.76 244.11
+PK_noM2 9 1000 87.57 81.31
+MT_noM2 10 1000 1111.42 953.12
+PK_noM2 10 1000 410.25 373.53
+MT_noM2 11 1000 4514.83 3788.46
+PK_noM2 11 1000 1920.89 1702.53
