@@ -1,12 +1,51 @@
 # Data layout and naming conventions
 
-All per-case files are **line-aligned with `test_cases/test_cases_{n}`**: line `i` of any
+The existing random/exhaustive per-case files are **line-aligned with `test_cases/test_cases_{n}`**: line `i` of any
 per-case file for a run starting at zero (line 1-based) refers to the truth table on line `i` of the test-case
 file. Each per-case line has the form `tt:value`, where `tt` is the truth-table integer and
 `value` the per-case number (a T or CX cost, or a lower bound).
 For a run starting at `start`, output line `i` corresponds to input line `start + i`.
 
 ## Directory overview
+
+The separate application-derived datasets are documented in
+[`test_cases/structured/README.md`](test_cases/structured/README.md). Their 51
+output functions retain fixed input counts: DES has 32 functions with 6 inputs;
+AES has 8 functions with 8 inputs; Ascon has 5 functions with 5 inputs; SPEEDY
+has 6 functions with 6 inputs. The manuscript's cryptographic S-box panel includes
+all four datasets, ordered by input count: Ascon, SPEEDY, DES, and AES.
+`evaluate_structured.py` writes dataset-specific CSV records to
+`structured_cost/<dataset>/<method>/`, with explicit timeout/error statuses and
+full-dataset means only for complete runs. These files are **not** aligned with
+the random `test_cases_{n}` files and must not be mixed with their baselines.
+
+All four datasets also have exports in the existing text formats, alongside their CSV
+records under `structured_cost/<dataset>/`:
+
+- `exorcism_cost/exorcism_{t,cx}_cost` and `exorcism_time`;
+- `sshr_cost/sshr_{t,cx}_cost` and, for a complete successful group,
+  `sshr_time`;
+- `{F,FS,FP}/our_{t_cost,cx_cost,results}_{route}.txt`.
+
+The dataset subdirectory is essential: even DES and SPEEDY, both at n=6, contain
+different functions, and none is aligned to the random `test_cases_{n}` files. The T/CX files
+retain the exact `tt:integer_cost` format, while `our_results` retains the usual
+mean wall time and lower/higher/same comparison blocks. The source CSV records
+remain authoritative. Regenerate/check these exports without synthesis using:
+
+```bash
+python experiments/export_structured_results.py
+python experiments/export_structured_results.py --check
+```
+
+DES SSHR-H completed 32/32. AES SSHR-H attempted all 8 outputs and timed out on
+all 8 at the 1200-second per-function limit. Accordingly, AES's two SSHR cost
+files are empty and it has no numeric `sshr_time`; `sshr_results.txt` records
+the timeout coverage. Its ACF result reports skip the SSHR cost comparisons.
+No timeout is substituted with zero cost or a successful 1200-second runtime.
+For Exorcism, the structured exporter writes one `total runtime` / `average
+runtime` pair, using the recorded mean of the two cost-interface calls for each
+output. It does not invent separate T/CX timing measurements from that mean.
 
 ```
 data/

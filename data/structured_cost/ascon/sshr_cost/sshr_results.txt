@@ -1,0 +1,7 @@
+sshr structured dataset: ascon
+number of input variables: 5 (5 cases)
+complete=5/5, timeout=0, error=0, unrun=0
+source: data/structured_cost/ascon/sshr/results.csv
+per-function synthesis limit: 1200 s
+mean T cost: 24.6
+mean CX cost: 29.0

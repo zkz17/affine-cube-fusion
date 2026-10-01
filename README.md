@@ -93,6 +93,12 @@ data/               test cases, baselines, and per-case results (see data/README
 
 ## Getting started
 
+For application-derived experiments on DES, AES, Ascon and SPEEDY S-box output functions, use
+the separate `evaluate_structured.py` entry. Dataset sources,
+bit ordering, regeneration, external backend setup and complete-dataset reporting
+are described in [the structured benchmark guide](data/test_cases/structured/README.md).
+The existing `evaluate.py` continues to handle the random/exhaustive datasets.
+
 Use Python 3.12 (the paper runs used 3.12.3). From the repository root, create and
 activate an environment on Linux or WSL:
 
@@ -227,6 +233,40 @@ These segments are visual guides, not interpolated measurements within the omitt
 interval. The two retained bands use the same linear scale per unit of physical
 height. The script rejects a break containing
 any observed point. The ordinary linear figure remains available for comparison.
+
+For a compact version of the complete starting-cover figure:
+
+```bash
+python -m experiments.plot_results --view compact --scale log
+python -m experiments.plot_results --view compact --time-break 13000 27000
+```
+
+These commands create `starting_cover_compact_log.{pdf,png}` and
+`starting_cover_compact_broken.{pdf,png}`. Both retain the eight optimized routes
+and all five original comparisons in one 7.16-by-3-inch figure: total T-count and
+CNOT-count above their F-normalized ratios, with synthesis time spanning both rows
+in the third column. The figure has one shared legend and 8-point tick labels at
+its intended two-column width. Cost totals are expressed in millions; normalization
+still divides batch totals by F at the same input size. No data points are removed.
+
+The logarithmic time axis shows the full runtime range without a break; its spacing
+represents ratios. The broken version keeps the original linear bands and uses
+`ConnectionPatch` to join the observed endpoints of each cross-band segment
+continuously in display coordinates. These links are visual guides, not
+interpolated measurements within the omitted interval. Both bands retain the same
+linear scale per unit of height, and the left axis retains its break marks. The data source is
+the same regenerated `starting_cover_summary.csv` used by the separate figures.
+Sample size and timing conventions belong in the paper caption, avoiding repeated
+titles inside the combined figure. Suggested caption for the logarithmic version:
+
+> Starting-cover and shift-search comparisons on 1,000 matched Boolean functions
+> at each input size n=5,...,11. In (a) and (b), upper panels show total costs and
+> lower panels show costs relative to F. Panel (c) shows mean synthesis times on
+> a logarithmic axis. Timings are from separate batch runs.
+
+For the broken version, replace "on a logarithmic axis" with "with the empty
+13,000--27,000 ms interval omitted". Embed the combined vector PDF at full text
+width in one figure rather than adding the previous three subfigure captions.
 
 The script requires exact-interval T, CX, and summary files and validates their input
 keys. It never substitutes a larger batch's mean runtime. Timing figures combine

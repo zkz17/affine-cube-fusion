@@ -5,6 +5,8 @@ Run from the repository root:
     ./venv/bin/python -m experiments.plot_results --metric cx
     ./venv/bin/python -m experiments.plot_results --metric time
     ./venv/bin/python -m experiments.plot_results --metric time --time-break 13000 27000
+    ./venv/bin/python -m experiments.plot_results --view compact --scale log
+    ./venv/bin/python -m experiments.plot_results --view compact --time-break 13000 27000
 
 Cost figures compare eight optimized configurations with absolute and F-normalized
 panels. Time figures show the same eight optimized configurations by default;
@@ -13,6 +15,7 @@ DD0/DD are display names for the saved A0/A routes; source names remain unchange
 All figures use cases [0, 1000) for n=5,...,11 by default.
 Only exact run intervals are accepted: a larger batch's runtime cannot be sliced.
 Writes a reusable T/CX/time summary CSV and PDF/PNG figures under figure/results/.
+The compact view combines both cost comparisons and time with one shared legend.
 """
 import argparse
 from itertools import islice
@@ -439,6 +442,185 @@ def draw_cost_comparison(summary, metric, output_dir):
     print(notes_path)
 
 
+def draw_compact_comparison(summary, scale, output_dir, break_limits=None):
+    """Retain all five comparisons in a single figure sized for two columns."""
+    comparison = summary[summary['route'].isin(OPTIMIZED_ROUTES)].copy()
+    sizes = sorted(int(n) for n in comparison['n'].unique())
+    reference = comparison[comparison['route'] == 'F'].set_index('n')
+    for column in ('total_t', 'total_cx'):
+        if (reference[column] <= 0).any():
+            raise ValueError('Normalization requires strictly positive F totals.')
+        comparison[f'relative_{column}'] = (
+            comparison[column] / comparison['n'].map(reference[column]))
+    if scale == 'log' and (comparison['avg_wall_ms'] <= 0).any():
+        raise ValueError('Log time scale requires strictly positive times.')
+    if break_limits:
+        low, high = break_limits
+        values = comparison['avg_wall_ms']
+        if not (math.isfinite(low) and math.isfinite(high) and 0 < low < high):
+            raise ValueError('Require finite time-break limits with 0 < LOW < HIGH.')
+        if ((values > low) & (values < high)).any():
+            raise ValueError('The requested time break would hide observed data points.')
+        if not ((values <= low).any() and (values >= high).any()):
+            raise ValueError('A time break requires observations on both sides.')
+
+    style = dict(PLOT_STYLE, **{
+        'font.size': 8, 'axes.labelsize': 8, 'axes.titlesize': 9,
+        'xtick.labelsize': 8, 'ytick.labelsize': 8,
+        'xtick.major.pad': 2, 'ytick.major.pad': 2,
+    })
+    with plt.rc_context(style):
+        fig = plt.figure(figsize=(7.16, 3.0))
+        grid = fig.add_gridspec(2, 3, left=0.075, right=0.99, bottom=0.14,
+                               top=0.80, wspace=0.40, hspace=0.23)
+
+        def route_lines(ax, column, divisor=1, break_threshold=None):
+            for route in OPTIMIZED_ROUTES:
+                data = comparison[comparison['route'] == route].sort_values('n')
+                family, stage = ROUTE_STYLES[route]
+                linestyle, marker = STAGE_STYLES[stage]
+                points = list(zip(data['n'], data[column] / divisor))
+                if break_threshold is not None:
+                    # Cross-band segments are drawn once below in display space.
+                    split_points = []
+                    previous = None
+                    for point in points:
+                        if (previous is not None and
+                                (previous[1] <= break_threshold) !=
+                                (point[1] <= break_threshold)):
+                            split_points.append((math.nan, math.nan))
+                        split_points.append(point)
+                        previous = point
+                    points = split_points
+                x, y = zip(*points)
+                ax.plot(x, y, label=ROUTE_LABELS[route],
+                        color=FAMILY_COLORS[family], linestyle=linestyle,
+                        marker=marker, markersize=3.4, markerfacecolor='white',
+                        markeredgewidth=0.8, linewidth=1.05,
+                        zorder=3 if stage in ('shift', 'proxy') else 2)
+
+        def format_axis(ax):
+            ax.set_xticks(sizes)
+            ax.set_xlim(min(sizes) - 0.15, max(sizes) + 0.15)
+            ax.grid(axis='y', which='major', color='#D8D8D8', linewidth=0.5)
+            ax.set_axisbelow(True)
+
+        cost_axes = []
+        relative_values = comparison[['relative_total_t', 'relative_total_cx']]
+        relative_min = math.floor(relative_values.min().min() * 10) / 10
+        relative_max = math.ceil(relative_values.max().max() * 10) / 10
+        for index, column, title in ((0, 'total_t', '(a) T-count'),
+                                     (1, 'total_cx', '(b) CNOT-count')):
+            absolute = fig.add_subplot(grid[0, index])
+            relative = fig.add_subplot(grid[1, index], sharex=absolute)
+            cost_axes.append(absolute)
+            route_lines(absolute, column, divisor=1e6)
+            route_lines(relative, f'relative_{column}')
+            for ax in (absolute, relative):
+                format_axis(ax)
+            absolute.set_ylim(bottom=0)
+            absolute.yaxis.set_major_locator(MaxNLocator(nbins=3))
+            absolute.set_ylabel(r'Total ($10^6$)')
+            absolute.set_title(title, pad=6)
+            absolute.tick_params(axis='x', labelbottom=False)
+            relative.set_ylim(relative_min, relative_max)
+            relative.yaxis.set_major_locator(MaxNLocator(nbins=4))
+            relative.set_ylabel('Relative to F')
+            relative.set_xlabel('Input variables, $n$', labelpad=3)
+
+        if break_limits:
+            from brokenaxes import brokenaxes
+
+            upper = math.ceil(float(values.max()) / 1000) * 1000 + 1000
+            bax = brokenaxes(ylims=((0, low), (high, upper)),
+                             xlims=((min(sizes) - 0.15, max(sizes) + 0.15),),
+                             subplot_spec=grid[:, 2], fig=fig, hspace=0.035,
+                             d=0.006, tilt=30, despine=True)
+            top, bottom = bax.axs
+            for ax in (top, bottom):
+                route_lines(ax, 'avg_wall_ms', break_threshold=low)
+                format_axis(ax)
+                ax.yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
+            top.set_ylim(high, upper)
+            bottom.set_ylim(0, low)
+            top.set_yticks([high, upper])
+            bottom.yaxis.set_major_locator(MaxNLocator(nbins=5))
+            top.spines['bottom'].set_visible(False)
+            top.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
+            for route in OPTIMIZED_ROUTES:
+                data = comparison[comparison['route'] == route].sort_values('n')
+                family, stage = ROUTE_STYLES[route]
+                linestyle, _ = STAGE_STYLES[stage]
+                points = list(zip(data['n'], data['avg_wall_ms']))
+                for start, stop in zip(points, points[1:]):
+                    if (start[1] <= low) == (stop[1] <= low):
+                        continue
+                    start_ax = bottom if start[1] <= low else top
+                    stop_ax = bottom if stop[1] <= low else top
+                    # Connect the measured endpoints after axis compression.
+                    # This is a visual guide, not interpolation across the break.
+                    bridge = ConnectionPatch(
+                        xyA=start, xyB=stop, coordsA=start_ax.transData,
+                        coordsB=stop_ax.transData, arrowstyle='-',
+                        connectionstyle='arc3,rad=0', shrinkA=1.7, shrinkB=1.7,
+                        color=FAMILY_COLORS[family], linewidth=1.05,
+                        linestyle=linestyle, clip_on=False)
+                    bridge.set_gid(f'{route}-cross-break-connection')
+                    fig.add_artist(bridge)
+            time_axis = bottom
+            title_axis = top
+            bax.set_ylabel('Mean time (ms/function)', labelpad=34)
+        else:
+            time_axis = fig.add_subplot(grid[:, 2])
+            title_axis = time_axis
+            route_lines(time_axis, 'avg_wall_ms')
+            format_axis(time_axis)
+            time_axis.set_yscale(scale)
+            if scale == 'linear':
+                time_axis.set_ylim(bottom=0)
+                time_axis.yaxis.set_major_formatter(StrMethodFormatter('{x:,.0f}'))
+            else:
+                time_axis.margins(y=0.05)
+                time_axis.minorticks_off()
+            time_axis.set_ylabel('Mean time (ms/function)', labelpad=3)
+        title_axis.set_title('(c) Synthesis time', pad=6)
+        time_axis.set_xlabel('Input variables, $n$', labelpad=3)
+        if break_limits:
+            for row in comparison[comparison['avg_wall_ms'] >= high].itertuples():
+                family, _ = ROUTE_STYLES[row.route]
+                top.annotate(f'{ROUTE_LABELS[row.route]}: {row.avg_wall_ms:,.0f} ms',
+                             (row.n, row.avg_wall_ms), xytext=(-5, 6),
+                             textcoords='offset points', ha='right', fontsize=7,
+                             color=FAMILY_COLORS[family])
+        fig.legend(*cost_axes[0].get_legend_handles_labels(), loc='upper center',
+                   bbox_to_anchor=(0.53, 1.0), ncol=8, frameon=False,
+                   fontsize=8, handlelength=3.0, columnspacing=1.0,
+                   handletextpad=0.45)
+
+        suffix = 'broken' if break_limits else scale
+        cases = int(comparison['cases'].iloc[0])
+        time_note = (f'linear axis omitting {low:g}--{high:g} ms; no observed '
+                     'points omitted; both bands have the same scale; cross-band '
+                     'links join measured endpoints in display coordinates as '
+                     'visual guides, not interpolated measurements'
+                     if break_limits else f'{scale} axis')
+        metadata = {
+            'Title': 'Starting-cover and shift-search comparisons',
+            'Subject': (f'{cases} matched functions per input size. Eight configurations. '
+                        'Top: total T/CNOT counts in millions. Bottom: ratios of totals '
+                        f'to F at the same n. Right: mean synthesis time, {time_note}. '
+                        'No smoothing. Timings from separate batch runs. '
+                        'Source: starting_cover_summary.csv.'),
+            'Creator': 'experiments.plot_results (Matplotlib)',
+        }
+        fig.canvas.draw()
+        for extension in ('pdf', 'png'):
+            output = output_dir / f'starting_cover_compact_{suffix}.{extension}'
+            fig.savefig(output, dpi=300, metadata=metadata)
+            print(output)
+        plt.close(fig)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--routes', nargs='+', choices=ROUTES,
@@ -448,12 +630,13 @@ def main():
     parser.add_argument('--start', type=int, default=0)
     parser.add_argument('--stop', type=int, default=1000)
     parser.add_argument('--metric', choices=METRICS, default='t')
-    parser.add_argument('--view', choices=('auto', 'overview', 'comparison', 't-comparison'),
+    parser.add_argument('--view', choices=('auto', 'overview', 'comparison', 't-comparison', 'compact'),
                         default='auto',
                         help='Default: cost comparison panels for t/cx, overview for time. '
+                             'compact combines T, CX, and time with a shared legend. '
                              't-comparison is an alias for the earlier T-only command.')
     parser.add_argument('--scale', choices=('linear', 'log', 'both'), default='linear',
-                        help='Axis scale for the overview; cost comparison panels are linear.')
+                        help='Overview axis scale, or compact-view time scale; costs remain linear.')
     parser.add_argument('--time-break', nargs=2, type=float, metavar=('LOW', 'HIGH'),
                         help='Omit an empty time interval in ms/function (linear time plot only).')
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'figure/results')
@@ -471,13 +654,21 @@ def main():
         args.view = 'comparison'
     if args.view == 'comparison' and (args.metric == 'time' or set(source_routes) != set(ROUTES)):
         parser.error('comparison requires --metric t or cx and all twelve source routes.')
-    if args.time_break and (args.metric != 'time' or args.scale != 'linear'):
-        parser.error('--time-break requires --metric time and --scale linear.')
+    if args.view == 'compact' and not set(OPTIMIZED_ROUTES).issubset(source_routes):
+        parser.error('compact requires all eight optimized routes.')
+    if args.time_break and (args.scale != 'linear' or
+                            (args.metric != 'time' and args.view != 'compact')):
+        parser.error('--time-break requires linear time axes (--metric time or --view compact).')
     summary = collect_summary(source_routes, sorted(args.sizes), args.start, args.stop)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = args.output_dir / 'starting_cover_summary.csv'
     summary.to_csv(summary_path, index=False)
     print(summary_path)
+    if args.view == 'compact':
+        scales = ('linear', 'log') if args.scale == 'both' else (args.scale,)
+        for scale in scales:
+            draw_compact_comparison(summary, scale, args.output_dir, args.time_break)
+        return
     if args.view == 'comparison':
         draw_cost_comparison(summary, args.metric, args.output_dir)
         return

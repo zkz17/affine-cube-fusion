@@ -1,0 +1,12 @@
+AES forward S-box: n=8, 8 output functions
+Full-dataset arithmetic means only; incomplete groups have no reported mean.
+Time is synthesis wall time (ms), excluding imports, verification and I/O.
+Exorcism time is the mean of its T-cost and CX-cost synthesis calls.
+
+F: complete=0/8, timeout=0, error=0, unrun=8
+FS: complete=0/8, timeout=0, error=0, unrun=8
+FP: complete=0/8, timeout=0, error=0, unrun=8
+exorcism: complete=8/8, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=1216.625000, mean cx_count=940.625000, mean synthesis_ms=17.883545
+sshr: complete=0/8, timeout=0, error=0, unrun=8

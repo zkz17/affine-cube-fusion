@@ -1,0 +1,32 @@
+Ascon S-box: n=5, 5 output functions
+Full-dataset arithmetic means only; incomplete groups have no reported mean.
+Time is synthesis wall time (ms), excluding imports, verification and I/O.
+Exorcism time is the mean of its T-cost and CX-cost synthesis calls.
+
+F: complete=5/5, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=8.400000, mean cx_count=13.200000, mean synthesis_ms=0.902688
+FS: complete=5/5, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=8.400000, mean cx_count=13.200000, mean synthesis_ms=3.687442
+FP: complete=5/5, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=8.400000, mean cx_count=11.400000, mean synthesis_ms=1.543883
+exorcism: complete=5/5, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=17.200000, mean cx_count=16.000000, mean synthesis_ms=0.504827
+sshr: complete=5/5, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: 1200 s
+  mean t_count=24.600000, mean cx_count=29.000000, mean synthesis_ms=4.183523
+F vs exorcism: t_count reduction=51.163%
+F vs exorcism: cx_count reduction=17.500%
+F vs sshr: t_count reduction=65.854%
+F vs sshr: cx_count reduction=54.483%
+FS vs exorcism: t_count reduction=51.163%
+FS vs exorcism: cx_count reduction=17.500%
+FS vs sshr: t_count reduction=65.854%
+FS vs sshr: cx_count reduction=54.483%
+FP vs exorcism: t_count reduction=51.163%
+FP vs exorcism: cx_count reduction=28.750%
+FP vs sshr: t_count reduction=65.854%
+FP vs sshr: cx_count reduction=60.690%

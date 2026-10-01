@@ -1,0 +1,6 @@
+# Ascon 5-bit S-box, hexadecimal outputs for inputs 00..1f.
+# NIST SP 800-232 (August 2025), Section 3.3, Table 6, printed page 10.
+# https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-232.pdf
+# In the specification's tuple (x0,...,x4), x0 is the most significant bit.
+04 0b 1f 14 1a 15 09 02 1b 05 08 12 1d 03 06 1c
+1e 13 07 0e 00 0d 11 18 10 0c 01 19 16 0a 0f 17

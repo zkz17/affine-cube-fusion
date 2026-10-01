@@ -1,0 +1,7 @@
+sshr structured dataset: speedy
+number of input variables: 6 (6 cases)
+complete=6/6, timeout=0, error=0, unrun=0
+source: data/structured_cost/speedy/sshr/results.csv
+per-function synthesis limit: 1200 s
+mean T cost: 85.5
+mean CX cost: 76.33333333333333

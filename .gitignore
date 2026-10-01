@@ -9,6 +9,7 @@ runs/
 __pycache__/
 experiments/phase0_results/
 data/*.so
+data/structured_cost/**/.running
 Affine_Cube_Fusion.pdf
 Affine_Cube_Fusion__IEEE_.pdf
 
@@ -16,4 +17,5 @@ Affine_Cube_Fusion__IEEE_.pdf
 docs/future_work.md
 docs/exorlink_unification.md
 docs/macro_m2_theory.md
+docs/structured_benchmark_plan.md
 pk_minterm_route_experiment.md

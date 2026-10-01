@@ -1,0 +1,24 @@
+SPEEDY forward S-box: n=6, 6 output functions
+Full-dataset arithmetic means only; incomplete groups have no reported mean.
+Time is synthesis wall time (ms), excluding imports, verification and I/O.
+Exorcism time is the mean of its T-cost and CX-cost synthesis calls.
+
+F: complete=6/6, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=72.833333, mean cx_count=65.166667, mean synthesis_ms=1.384751
+FS: complete=6/6, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=62.666667, mean cx_count=56.666667, mean synthesis_ms=22.515761
+FP: complete=6/6, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=62.666667, mean cx_count=55.500000, mean synthesis_ms=4.619316
+exorcism: complete=6/6, timeout=0, error=0, unrun=0
+  Per-function synthesis limit: none s
+  mean t_count=74.500000, mean cx_count=59.166667, mean synthesis_ms=0.650329
+sshr: complete=0/6, timeout=0, error=0, unrun=6
+F vs exorcism: t_count reduction=2.237%
+F vs exorcism: cx_count reduction=-10.141%
+FS vs exorcism: t_count reduction=15.884%
+FS vs exorcism: cx_count reduction=4.225%
+FP vs exorcism: t_count reduction=15.884%
+FP vs exorcism: cx_count reduction=6.197%

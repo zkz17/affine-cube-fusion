@@ -1,0 +1,31 @@
+****** Comparison of oracle synthesis routes ******
+number of input variables: 6 (32 cases); path=F
+avg synthesize wall: 4.56 ms/case
+===== Exorcism T =====
+lower  cost in 24(75.0%) cases
+higher cost in 8(25.0%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: [15666481816606636362, 10838243909044048083, 11875313622399236424, 14342620963323010347, 10782578865424081740, 14310531783088052841, 12991396829552994651, 10576529968430766438]
+total cost: baseline 6140, ours 5286 (reduction 13.91%)
+===== Exorcism CX =====
+lower  cost in 16(50.0%) cases
+higher cost in 16(50.0%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: [2876063562204127017, 8388670587917344707, 5444179476418483866, 8555033946419803977, 15666481816606636362, 10838243909044048083, 14657371310322749079, 10575550448541915198, 11875313622399236424, 14342620963323010347, 10782578865424081740, 14310531783088052841, 12991396829552994651, 7680313134712324596, 10576529968430766438, 12039908131475635980]
+total cost: baseline 4860, ours 4865 (reduction -0.10%)
+===== SSHR T =====
+lower  cost in 25(78.125%) cases
+higher cost in 7(21.875%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: [2876063562204127017, 8555033946419803977, 14657371310322749079, 10575550448541915198, 11875313622399236424, 14342620963323010347, 7680313134712324596]
+total cost: baseline 6209, ours 5286 (reduction 14.87%)
+===== SSHR CX =====
+lower  cost in 25(78.125%) cases
+higher cost in 7(21.875%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: [2876063562204127017, 8555033946419803977, 10838243909044048083, 14657371310322749079, 11875313622399236424, 14342620963323010347, 7680313134712324596]
+total cost: baseline 5918, ours 4865 (reduction 17.79%)
+G-3 lower bound: Σ t(deg f) = 992 (18.77% of ours ΣT)
+****** ****** ******
+structured dataset: des; M2=on; synthesis ancillas=0
+source: data/structured_cost/des/F/results.csv

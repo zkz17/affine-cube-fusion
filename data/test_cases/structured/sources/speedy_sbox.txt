@@ -1,0 +1,8 @@
+# SPEEDY forward 6-bit S-box, hexadecimal outputs for inputs 00..3f.
+# Leander, Moos, Moradi, Rasoolzadeh, The SPEEDY Family of Block Ciphers.
+# https://eprint.iacr.org/2021/960.pdf, Table 3, printed page 14.
+# In the specification's tuple (x0,...,x5), x0 is the most significant bit.
+08 00 09 03 38 10 29 13 0c 0d 04 07 30 01 20 23
+1a 12 18 32 3e 16 2c 36 1c 1d 14 37 34 05 24 27
+02 06 0b 0f 33 17 21 15 0a 1b 0e 1f 31 11 25 35
+22 26 2a 2e 3a 1e 28 3c 2b 3b 2f 3f 39 19 2d 3d

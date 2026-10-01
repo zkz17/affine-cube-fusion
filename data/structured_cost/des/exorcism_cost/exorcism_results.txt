@@ -1,0 +1,7 @@
+exorcism structured dataset: des
+number of input variables: 6 (32 cases)
+complete=32/32, timeout=0, error=0, unrun=0
+source: data/structured_cost/des/exorcism/results.csv
+mean T cost: 191.875
+mean CX cost: 151.875
+Time convention: each recorded time is the mean of the T-cost and CX-cost calls; total runtime sums those per-function means.

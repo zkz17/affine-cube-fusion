@@ -1,0 +1,22 @@
+****** Comparison of oracle synthesis routes ******
+number of input variables: 8 (8 cases); path=FS
+avg synthesize wall: 1877.91 ms/case
+===== Exorcism T =====
+lower  cost in 8(100.0%) cases
+higher cost in 0(0.0%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: []
+total cost: baseline 9733, ours 7105 (reduction 27.00%)
+===== Exorcism CX =====
+lower  cost in 8(100.0%) cases
+higher cost in 0(0.0%) cases
+same   cost in 0(0.0%) cases
+cases with higher cost: []
+total cost: baseline 7525, ours 6157 (reduction 18.18%)
+===== SSHR T:baseline missing, skipped =====
+===== SSHR CX:baseline missing, skipped =====
+G-3 lower bound: Σ t(deg f) = 376 (5.29% of ours ΣT)
+****** ****** ******
+structured dataset: aes; M2=on; synthesis ancillas=0
+source: data/structured_cost/aes/FS/results.csv
+SSHR-H comparison unavailable: complete=0/8, timeout=8, error=0, unrun=0; see ../sshr_cost/sshr_results.txt.

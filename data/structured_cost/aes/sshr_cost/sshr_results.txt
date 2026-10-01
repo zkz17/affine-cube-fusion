@@ -1,0 +1,6 @@
+sshr structured dataset: aes
+number of input variables: 8 (8 cases)
+complete=0/8, timeout=8, error=0, unrun=0
+source: data/structured_cost/aes/sshr/results.csv
+per-function synthesis limit: 1200 s
+Full-dataset costs and mean synthesis time unavailable; cost files are empty.

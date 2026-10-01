@@ -1,0 +1,7 @@
+sshr structured dataset: des
+number of input variables: 6 (32 cases)
+complete=32/32, timeout=0, error=0, unrun=0
+source: data/structured_cost/des/sshr/results.csv
+per-function synthesis limit: 1200 s
+mean T cost: 194.03125
+mean CX cost: 184.9375

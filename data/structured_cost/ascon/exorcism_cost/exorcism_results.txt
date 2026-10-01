@@ -1,0 +1,7 @@
+exorcism structured dataset: ascon
+number of input variables: 5 (5 cases)
+complete=5/5, timeout=0, error=0, unrun=0
+source: data/structured_cost/ascon/exorcism/results.csv
+mean T cost: 17.2
+mean CX cost: 16.0
+Time convention: each recorded time is the mean of the T-cost and CX-cost calls; total runtime sums those per-function means.
