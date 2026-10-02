@@ -47,6 +47,11 @@ and the evaluator default to zero-ancilla **FS**, with M2 enabled (`m2_post=True
 Explicit nonzero `ancilla_num` values retain the historical ancilla-assisted backend,
 which is outside the paper's experiments.
 
+**Known limitation:** The historical backend with `ancilla_num > 0` has known
+correctness issues and may fail to restore input qubits. Use `ancilla_num=0` for
+supported synthesis; fixing the nonzero-ancilla backend is future work. See
+[the algebra notes](docs/CompleteBranch_algebra.md), Section 6.2 and Appendix D.
+
 | Path | Front-end | Notes |
 |---|---|---|
 | **F** | ANF decomposition (`c = 0`) | the unshifted ANF starting cover followed by fusion |
@@ -110,6 +115,11 @@ python -m pip install -r requirements.txt
 
 On Windows PowerShell, use `py -3.12 -m venv venv`, then
 `.\venv\Scripts\Activate.ps1` and the same `python -m pip install` command.
+
+On Windows, printing Qiskit's Unicode circuit diagrams (for example, in `main.py`)
+may raise `UnicodeEncodeError` when output uses a legacy encoding, especially when
+redirected. Run `python -X utf8 main.py` to enable Python's UTF-8 mode.
+
 `requirements.txt` includes NumPy, Qiskit, SciPy, Graphviz's Python package, and
 sortedcontainers. DD image rendering additionally needs the Graphviz system executable
 `dot` on PATH (for example, `sudo apt install graphviz` on Ubuntu); synthesis and tests

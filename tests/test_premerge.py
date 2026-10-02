@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-Phase 1.2 (T-3): tests for the ANF premerge path for monomials differing in one variable.
+Tests for the experimental ANF premerge helper and default FS synthesis.
 
 Identity: x^S ⊕ x^{S∪{j}} = x^S·x̄_j (exact).
-Acceptance scope (see docs/architecture.md, section 1.2):
+Coverage:
   - pool XOR invariant (before/after premerge and after fusion);
   - every premerged product is a valid affine cube;
-  - end-to-end synthesize verified case by case + fused ΣT statistics compared with the raw ANF pool
-    (per-case non-worsening is structurally guaranteed by min(A, F, F′); here we only observe statistics).
+  - fused ΣT statistics for premerged and raw ANF pools, without a non-worsening guarantee;
+  - default zero-ancilla FS synthesis with M2 enabled, verified case by case.
+
+The premerge helper is exercised directly by test_premerge_invariant. The end-to-end
+check follows the default FS route described in docs/architecture.md, section 2.
 """
 from collections import Counter
 from random import randint
@@ -80,8 +83,8 @@ def test_premerge_invariant(num_vars=6, rounds=200, verbose=False):
 
 
 def test_premerge_end_to_end(num_vars=5, rounds=120, verbose=False):
-    """End-to-end: synthesis verified case by case via compute_tt (through the min(A, F, F′) backend)."""
-    print(f'Testing premerge end-to-end with {rounds} random {num_vars}-input functions...')
+    """Verify default zero-ancilla FS synthesis with M2 enabled via compute_tt."""
+    print(f'Testing default FS end-to-end with {rounds} random {num_vars}-input functions...')
 
     n = num_vars
     synth = OracleSynthesizer(reorder=True, ancilla_num=0, fused_backend=True)
@@ -89,14 +92,14 @@ def test_premerge_end_to_end(num_vars=5, rounds=120, verbose=False):
         tt = random_tt(n)
         synth.synthesize(tt)
         assert synth.circ.verify(tt), f'synthesis verification failed: tt={tt.bitstr}'
-    print('Premerge end-to-end test passed!!!')
+    print('Default FS end-to-end test passed!!!')
 
 
 def main(verbose=False):
     for n, rounds in ((4, 200), (5, 150), (6, 80)):
         test_premerge_invariant(n, rounds, verbose)
     test_premerge_end_to_end(5, 120, verbose)
-    print('====== All premerge tests passed!!! ======')
+    print('====== All premerge-helper and default FS tests passed!!! ======')
 
 
 if __name__ == '__main__':

@@ -15,5 +15,5 @@ cases with higher cost: []
 total cost: baseline 10863541, ours 9018632 (reduction 16.98%)
 ===== SSHR T:baseline missing, skipped =====
 ===== SSHR CX:baseline missing, skipped =====
-G-3 lower bound: ¦² t(deg f) = 74960 (0.67% of ours ¦²T)
+G-3 lower bound: Î£ t(deg f) = 74960 (0.67% of ours Î£T)
 ****** ****** ******
