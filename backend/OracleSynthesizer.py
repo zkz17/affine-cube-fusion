@@ -31,9 +31,9 @@ class OracleSynthesizer:
         # (silently ignored when ancilla_num>0)
         self.fused_backend = fused_backend
         # G-2.2 optional switch (off by default): deterministic GL(n,2) local search, time for quality
-        # (about +6s/case at n=7, 94% of which is the fusion engine itself -- see docs/architecture.md G-2.2).
+        # (about +6s/case at n=7, 94% of which is the fusion engine itself -- see docs/architecture.md, section 3).
         # Exploration-phase discipline: FG is an **independent option** (it does not implicitly carry A);
-        # a min over path combinations only happens among the explicitly selected paths, never hidden.
+        # only one route is selected; multi-path combinations are not supported.
         self.gl_search = gl_search
         # Plan A optional switch (off by default): the fusion-free proxy prescreen **replaces** the FS path
         # (a choice relation, not a min; intended to upgrade the current shift climb2 for n≥9, 12~28%
@@ -176,14 +176,15 @@ class OracleSynthesizer:
           A. BDD path: graph phase (try_neg / split_neg / reorder / splitting, absorb removed)
              → branch pool → global fusion;
           F. ANF path: truth table → Möbius → monomial pool (c=0);
-          FS. FPRM path (G-2.1): search for the optimal c over the shift subgroup (n≤8 full 2^n
+          FS. FPRM path (G-2.1): search for c by pairwise-fused T cost (n≤8 full 2^n
              enumeration; n≥9 deterministic two-start climb2); circuit = X(c) sandwich (T-free).
         With fprm_proxy=True, FS is replaced by the fusion-free proxy prescreen version (choice relation,
-        not min). Ties are prioritized by the given order in paths (default FS only, no tie issue).
+        not min). No comparison across multiple paths is performed.
 
         Optional (gl_search=True, G-2.2): ignore paths and run the **FG option** alone -- deterministic
-        GL(n,2) local search (candidates include the FPRM-optimal cF, so FG ≤ FS, zero regression
-        relative to FS; zero wrapper preferred on T ties). Exploration-phase discipline: FG is an
+        GL(n,2) local search (candidates include the FS-selected cF, so FG ≤ FS before M2;
+        zero wrapper preferred on T ties). Applying M2 to both winning pools does not preserve
+        this dominance guarantee. Exploration-phase discipline: FG is an
         independent option, no implicit min(A,FG). Cost: about +6s/case at n=7.
 
         Note: the F' path (ANF one-variable-apart pre-merge, 1.2/T-3) was measured and
@@ -204,9 +205,8 @@ class OracleSynthesizer:
 
         if self.gl_search:
             # ---- option FG: deterministic GL(n,2) local search (independent option, no implicit min) ----
-            # Exploration-phase discipline: any "multi-path min" must be an explicit option; FG is a
-            # standalone item and no longer implicitly carries A. (FG's internal candidates include cF,
-            # so FG ≤ FS, zero regression relative to FS is preserved.)
+            # FG runs alone and includes the FS-selected cF among its internal candidates,
+            # so its pairwise-fused T cost is no greater than FS before M2.
             kept, standalone, shift_c, cnots = gl_search(tt.bitstr, n)
             if self.m2_post:
                 kept, standalone = m2_interleaved(kept, standalone, n)
@@ -336,7 +336,8 @@ class OracleSynthesizer:
 
     def _fprm_entries(self, tt, n):
         """
-        G-2.1: search for the optimal ANF pool over the shift subgroup.
+        G-2.1: search shifted ANF pools by their pairwise-fused T cost.
+        The search is exhaustive for n≤8 and heuristic for n≥9; M2 is applied later.
 
         Returns (kept, standalone, best_c). Budget policy (stage 3.1-C decision):
           n ≤ 8: full 2^n enumeration (cheap, under 1.9s/case);

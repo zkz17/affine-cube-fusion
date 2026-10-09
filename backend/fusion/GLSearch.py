@@ -3,12 +3,14 @@
 G-2.2: deterministic GL(n,2) local search (an **optional** switch on the production path, off by default).
 
 Design (finalized by gl_det_probe measurements, de-randomized):
-  - baseline: FPRM-optimal shift cF (including c=0; n≤8 full enumeration, n≥9 two-start shift climbing);
+  - baseline: FS-selected shift cF (including c=0; n≤8 full enumeration, n≥9 two-start shift climbing);
   - start set: {identity on f, identity on f∘τ_cF} ∪ {all single-CNOT E_ij on f∘τ_cF},
     totaling 2 + n(n−1) starts, **fully deterministic**;
   - climbing: steepest ascent in the CNOT neighborhood, strict improvement, step cap max_steps;
   - candidates include cF itself (zero wrapper); on T ties the zero wrapper is preferred, so the result
-    ≤ FPRM optimum (dominance chain FG ≤ FS ≤ F preserved) and CX is not overpaid due to ties.
+    has pairwise-fused T cost ≤ FS (the chain FG ≤ FS ≤ F holds before macro-M2 post-processing).
+    Selecting the zero wrapper on a T tie avoids additional wrapper CNOTs; this is not a
+    guarantee that the final emitted CX count is minimal.
 
 Cost composition (measured at n=7): ~2400 evaluations × 2.55ms, of which **94% is fuse_pool_global**
 (every coordinate change requires a fresh Möbius + fusion, no reuse) -- this is why the switch is off
@@ -77,7 +79,7 @@ def climb_best(A0, cnots0, cost, n, max_steps):
 
 
 def fprm_best(fn, n):
-    """FPRM-optimal shift (budget policy identical to production _fprm_entries). Returns (cost, c)."""
+    """Select a shift using production's exhaustive/climb2 budget policy. Return (cost, c)."""
     full = 1 << n
     if full <= 256:
         shifts = range(full)

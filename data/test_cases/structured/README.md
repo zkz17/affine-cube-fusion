@@ -99,8 +99,9 @@ python evaluate_structured.py summarize des
 Replace `des` with `aes`, `ascon` or `speedy` for the other groups.
 ACF needs the project's ordinary requirements. Exorcism needs the existing
 `caterpillar_bindings` native module in `data/` (or `--exorcism-dir`); it must match
-the operating system and Python ABI. The supplied local `.so` works in Linux/WSL,
-not native Windows. Truth-table words are padded to their full fixed input width,
+the operating system and Python ABI. The `.so` used for the recorded experiments
+is not included in this repository and requires Linux/WSL rather than native Windows.
+Truth-table words are padded to their full fixed input width,
 including zero high words.
 
 SSHR-H uses the primitives from [quantum-sshr](https://github.com/grrain/quantum-sshr)

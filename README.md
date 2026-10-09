@@ -282,3 +282,11 @@ The script requires exact-interval T, CX, and summary files and validates their 
 keys. It never substitutes a larger batch's mean runtime. Timing figures combine
 separate batch runs and should be read as descriptive comparisons. To fill a missing
 batch, use `python evaluate.py <n> 0 1000 <route>` before regenerating the figure.
+
+## License
+
+The original code and accompanying documentation in this repository are licensed
+under the [MIT License](LICENSE). Third-party materials retain their respective
+licenses and notices.
+
+Copyright (c) 2026 Kezhen Zhang.

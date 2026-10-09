@@ -387,7 +387,7 @@ def anf_degree(bitstr, n):
     """
     The ANF degree of f = max popcount of an ANF monomial mask.
 
-    Corollary D1 (docs/architecture.md lemma D): any branch-segment decomposition satisfies
+    Under the cost model in config.py, any affine-block decomposition satisfies
     ΣT ≥ t(deg f), so t(anf_degree) is a **free global quality lower bound** (G-3 metric).
     Note deg is invariant under invertible affine substitutions (including FPRM shifts).
     Cost = one anf_pool (O(n·2^n), same as the ANF path).
